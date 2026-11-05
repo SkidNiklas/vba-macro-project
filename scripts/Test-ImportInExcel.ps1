@@ -48,6 +48,17 @@ function Get-OptionalValue([scriptblock] $read) {
     try { return [string] (& $read) } catch { return '(none)' }
 }
 
+function Get-FontValue($control, [string] $property) {
+    # $control.Font.Name reads as empty through PowerShell's COM adapter, so ask the objects directly.
+    try {
+        $getProperty = [Reflection.BindingFlags]::GetProperty
+        $font = [System.__ComObject].InvokeMember('Font', $getProperty, $null, $control, $null)
+        return [string] [System.__ComObject].InvokeMember($property, $getProperty, $null, $font, $null)
+    } catch {
+        return '(none)'
+    }
+}
+
 function Get-DesignerControls($component) {
     @($component.Designer.Controls | ForEach-Object {
         $control = $_
@@ -74,10 +85,10 @@ function Get-DesignerControls($component) {
             textAlign   = Get-OptionalValue { $control.TextAlign }
             wordWrap    = Get-OptionalValue { $control.WordWrap }
             autoSize    = Get-OptionalValue { $control.AutoSize }
-            fontName    = Get-OptionalValue { $control.Font.Name }
-            fontSize    = Get-OptionalValue { $control.Font.Size }
-            fontBold    = Get-OptionalValue { $control.Font.Bold }
-            fontItalic  = Get-OptionalValue { $control.Font.Italic }
+            fontName    = Get-FontValue $control 'Name'
+            fontSize    = Get-FontValue $control 'Size'
+            fontBold    = Get-FontValue $control 'Bold'
+            fontItalic  = Get-FontValue $control 'Italic'
         }
     })
 }
