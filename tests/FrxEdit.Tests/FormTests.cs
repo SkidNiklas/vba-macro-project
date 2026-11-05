@@ -124,6 +124,12 @@ public class FormTests
                 differences.Add($"{control.Name}.parent: Excel {control.Parent ?? "(form)"}, frxedit {other.Parent ?? "(form)"}");
             }
 
+            // Excel reports 0 for the position and size of a MultiPage page, so only name, type and parent can be compared.
+            if (control.Type == "Page")
+            {
+                continue;
+            }
+
             AddIfOutsideTolerance(differences, control.Name, "left", control.Left, other.LeftPt);
             AddIfOutsideTolerance(differences, control.Name, "top", control.Top, other.TopPt);
             // An ActiveX control keeps its size in its own data, which frxedit does not interpret.
