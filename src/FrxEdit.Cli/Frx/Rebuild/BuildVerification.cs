@@ -6,6 +6,21 @@ internal static partial class BuildVerification
 {
     private static readonly string[] LayoutProperties = ["left", "top", "width", "height"];
 
+    private static readonly HashSet<string> LocationProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "recordIndex", "recordDelta", "recordBlock", "objectStreamLength", "objectStreamConsumedBytes", "OleObjectBlob", "recordMarkerHex",
+    };
+
+    /// <summary>Totals for a whole container, which change when a control in it does.</summary>
+    private static readonly HashSet<string> ContainerProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "nextAvailableId", "siteDataCountOfSites", "siteDataCountOfBytes", "classTableCount",
+    };
+
+    private static readonly string[] BookkeepingPrefixes = ["cb", "propMask", "textProps", "objectStream", "siteObjectStream", "variousPropertyBits", "sitePropMask", "siteBitFlags", "siteName", "name"];
+
+    private static readonly string[] BookkeepingSuffixes = ["ByteCount", "Compressed", "CountRaw"];
+
     private static readonly Dictionary<string, bool> SiteFlagDefaults = new(StringComparer.OrdinalIgnoreCase)
     {
         ["tabStop"] = true,
@@ -117,6 +132,124 @@ internal static partial class BuildVerification
 
         return lost;
     }
+
+    /// <summary>
+    /// Properties that were read from the source but differ in the rebuilt form, without the patch asking for it.
+    /// Nothing may differ in a build without changes. A patched control may differ only in what it was patched
+    /// with and in the bookkeeping that follows from that.
+    /// </summary>
+    public static IReadOnlyList<string> FindUnrequestedChanges(LayoutInspection target, LayoutInspection rebuilt, PatchDocument? patch)
+    {
+        var differences = new List<string>();
+        var rebuiltByName = rebuilt.Controls.ToLookup(control => control.Name, StringComparer.OrdinalIgnoreCase);
+        var added = (patch?.Add ?? []).Select(control => control.Name ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var moved = patch?.Move?.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        foreach (var control in target.Controls)
+        {
+            var other = rebuiltByName[control.Name].FirstOrDefault();
+            if (other is null || added.Contains(control.Name) || moved.Contains(control.Name))
+            {
+                continue;
+            }
+
+            AddPropertyDifferences(control.Name, control.Properties, other.Properties, patch, RequestedProperties(patch, control.Name), differences);
+        }
+
+        if (patch is null)
+        {
+            AddPropertyDifferences("<form>", target.FrxFormControl, rebuilt.FrxFormControl, patch, null, differences);
+        }
+
+        return differences;
+    }
+
+    private static HashSet<string>? RequestedProperties(PatchDocument? patch, string name)
+    {
+        if (patch is null)
+        {
+            return null;
+        }
+
+        var originalName = patch.Renames?.FirstOrDefault(pair => pair.Value.Equals(name, StringComparison.OrdinalIgnoreCase)).Key ?? name;
+        var requested = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var isPatched = patch.Layout?.ContainsKey(originalName) == true || patch.Renames?.ContainsKey(originalName) == true;
+        foreach (var key in new[] { originalName, name })
+        {
+            if (patch.Properties?.TryGetValue(key, out var properties) == true)
+            {
+                requested.UnionWith(properties.Keys);
+                isPatched = true;
+            }
+        }
+
+        return isPatched ? requested : null;
+    }
+
+    private static void AddPropertyDifferences(
+        string name,
+        Dictionary<string, object?>? expected,
+        Dictionary<string, object?>? actual,
+        PatchDocument? patch,
+        HashSet<string>? requested,
+        List<string> differences)
+    {
+        var keys = (expected?.Keys ?? Enumerable.Empty<string>()).Union(actual?.Keys ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        foreach (var key in keys)
+        {
+            if (IsLocation(key) || (patch is not null && ContainerProperties.Contains(key)) || FollowsFromPatch(key, requested))
+            {
+                continue;
+            }
+
+            var expectedJson = ComparableJson(expected?.GetValueOrDefault(key));
+            var actualJson = ComparableJson(actual?.GetValueOrDefault(key));
+            if (expectedJson != actualJson)
+            {
+                differences.Add($"{name}.{key}: {expectedJson} != {actualJson}");
+            }
+        }
+    }
+
+    /// <summary>Where a value lies in the file. It moves when anything before it changes.</summary>
+    private static bool IsLocation(string key) =>
+        key.Contains("offset", StringComparison.OrdinalIgnoreCase) ||
+        key.EndsWith("Span", StringComparison.OrdinalIgnoreCase) ||
+        key.EndsWith("StreamIndex", StringComparison.OrdinalIgnoreCase) ||
+        LocationProperties.Contains(key);
+
+    private static bool FollowsFromPatch(string key, HashSet<string>? requested)
+    {
+        if (requested is null)
+        {
+            return false;
+        }
+
+        if (BookkeepingPrefixes.Any(prefix => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) ||
+            BookkeepingSuffixes.Any(suffix => key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // A patched caption also changes captionCount, and a patched font bit changes FontEffects.
+        return requested.Any(property => key.StartsWith(property, StringComparison.OrdinalIgnoreCase)) ||
+               (key.StartsWith("font", StringComparison.OrdinalIgnoreCase) &&
+                requested.Any(property => property.StartsWith("font", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string ComparableJson(object? value) =>
+        JsonSerializer.Serialize(WithoutLocations(value), FrxEditApp.JsonOptions);
+
+    private static object? WithoutLocations(object? value) => value switch
+    {
+        IDictionary<string, object?> dictionary => dictionary
+            .Where(pair => !IsLocation(pair.Key))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(pair => pair.Key, pair => WithoutLocations(pair.Value)),
+        string => value,
+        byte[] => value,
+        System.Collections.IEnumerable items => items.Cast<object?>().Select(WithoutLocations).ToList(),
+        _ => value,
+    };
 
     private static List<string> ExpectedControlNames(IEnumerable<string> sourceNames, PatchDocument? patch)
     {

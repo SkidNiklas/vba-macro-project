@@ -102,6 +102,46 @@ public class FormTests
         AssertNoDifferences(differences);
     }
 
+    [Theory]
+    [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
+    public void Build_without_changes_keeps_every_stream(string form)
+    {
+        using var workspace = new Workspace();
+        var source = workspace.CopyForm(TestForms.PathOf(form));
+        var output = workspace.PathOf($"out/{form}.frm");
+
+        var result = workspace.Run("build", source, "--out", output, "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        Assert.Empty(StreamComparer.Differences(source, output));
+    }
+
+    /// <summary>Forces every control with a font to be written anew. The build stops by itself if anything else is lost.</summary>
+    [Theory]
+    [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
+    public void Rewriting_controls_keeps_what_the_patch_did_not_touch(string form)
+    {
+        using var workspace = new Workspace();
+        var source = workspace.CopyForm(TestForms.PathOf(form));
+        var before = workspace.ReadControls(source);
+        var targets = before.Where(control => control.Type != "ActiveX" && control.Properties?.ContainsKey("fontName") == true).ToList();
+        if (targets.Count == 0)
+        {
+            Assert.Skip("This form has no control with a font.");
+        }
+
+        var output = workspace.PathOf($"out/{form}.frm");
+        var patch = workspace.WritePatch("patch.json", $$"""{ "properties": { {{string.Join(", ", targets.Select(control => $$"""
+            "{{control.Name}}": { "fontItalic": true }
+            """))}} } }""");
+
+        var result = workspace.Run("build", source, patch, "--out", output, "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        var after = workspace.ReadControls(output).ToDictionary(control => control.Name);
+        Assert.All(targets, control => Assert.True(after[control.Name].Properties!["fontItalic"].GetBoolean(), control.Name));
+    }
+
     private static uint? FontEffects(ControlRecord control) =>
         control.Properties?.TryGetValue("fontEffects", out var value) is true ? value.GetUInt32() : null;
 

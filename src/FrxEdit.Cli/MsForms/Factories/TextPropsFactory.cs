@@ -23,7 +23,7 @@ internal static class TextPropsFactory
         var fontCharSet = MsFormsFactoryBinary.GetInt32(properties, "fontCharSet") ?? 0;
         var fontPitchAndFamily = MsFormsFactoryBinary.GetInt32(properties, "fontPitchAndFamily") ?? 2;
 
-        var sourceEffects = GetSourceFontEffects(properties);
+        var sourceEffects = MsFormsFactoryBinary.GetUInt32(properties, "fontEffects");
         if (sourceEffects is not null || fontItalic || fontUnderline || fontStrikethrough)
         {
             propMask |= 1u << 1;
@@ -154,24 +154,6 @@ internal static class TextPropsFactory
     private static bool HasBit(uint value, int bit) => (value & (1u << bit)) != 0;
 
     private static uint WithBit(uint value, int bit, bool on) => on ? value | (1u << bit) : value & ~(1u << bit);
-
-    /// <summary>The FontEffects value read from the source form. A value above int.MaxValue is valid, so GetInt32 won't do.</summary>
-    private static uint? GetSourceFontEffects(Dictionary<string, object?> properties)
-    {
-        if (!properties.TryGetValue("fontEffects", out var value))
-        {
-            return null;
-        }
-
-        return value switch
-        {
-            uint unsigned => unsigned,
-            int signed => unchecked((uint)signed),
-            long wide when wide is >= 0 and <= uint.MaxValue => (uint)wide,
-            JsonElement element when element.ValueKind == JsonValueKind.Number && element.TryGetUInt32(out var parsed) => parsed,
-            _ => null
-        };
-    }
 
     public static uint WithParagraphAlignIfNeeded(uint propMask, Dictionary<string, object?> properties)
     {

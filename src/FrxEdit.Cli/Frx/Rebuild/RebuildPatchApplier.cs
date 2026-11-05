@@ -1,5 +1,17 @@
 internal static class RebuildPatchApplier
 {
+    private const int MinimumBoldWeight = 600;
+
+    /// <summary>Patch properties that are stored only in FormSiteData.</summary>
+    private static readonly HashSet<string> SiteOnlyProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tabIndex",
+        "tabStop",
+        "visible",
+        "default",
+        "cancel",
+    };
+
     private static readonly HashSet<string> ObjectPropertyNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "caption",
@@ -103,7 +115,7 @@ internal static class RebuildPatchApplier
             (!allowFormSitePatch || patch.Add is null || patch.Add.Count == 0) &&
             (!allowFormSitePatch || patch.Remove is null || patch.Remove.Count == 0))
         {
-            return source;
+            return source.KeepingAllControlBytes();
         }
 
         var patchedByName = patch.Properties?.ToDictionary(
@@ -152,6 +164,8 @@ internal static class RebuildPatchApplier
 
         var removedControls = new List<ControlInfo>();
         var controls = new List<ControlInfo>(source.Controls.Count + (patch.Add?.Count ?? 0));
+        var unchangedObjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unchangedSites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var control in source.Controls)
         {
             if (removalPlan.ControlNames.Contains(control.Name))
@@ -185,10 +199,17 @@ internal static class RebuildPatchApplier
             if (requested is null && layout is null && string.IsNullOrWhiteSpace(newName))
             {
                 controls.Add(control);
+                unchangedObjects.Add(control.Name);
+                unchangedSites.Add(control.Name);
                 continue;
             }
 
-            controls.Add(ApplyToControl(control, requested, layout, newName, patchDir));
+            var patched = ApplyToControl(control, requested, layout, newName, patchDir);
+            controls.Add(patched);
+            if (ChangesOnlyTheSite(requested, layout))
+            {
+                unchangedObjects.Add(patched.Name);
+            }
         }
 
         if (renameByName.Count > 0)
@@ -210,7 +231,18 @@ internal static class RebuildPatchApplier
             controls.AddRange(BuildAddedControls(source.Controls, controls, patch.Add, patchDir, patchedByName, layoutByName));
         }
 
-        return source with { Controls = controls, RemovedControls = removedControls, RemovedStoragePaths = removalPlan.StoragePaths, FrxFormControl = frxFormControl };
+        return source with { ControlsWithUnchangedObject = unchangedObjects, ControlsWithUnchangedSite = unchangedSites, Controls = controls, RemovedControls = removedControls, RemovedStoragePaths = removalPlan.StoragePaths, FrxFormControl = frxFormControl };
+    }
+
+    /// <summary>True if the patch changes only fields kept in FormSiteData, so the object data can stay as it is.</summary>
+    private static bool ChangesOnlyTheSite(Dictionary<string, JsonElement>? requested, LayoutPatch? layout)
+    {
+        var sizeChanges = layout is not null &&
+            (layout.RawWidth ?? layout.Width ?? layout.RawHeight ?? layout.Height) is not null ||
+            layout?.WidthPt is not null ||
+            layout?.HeightPt is not null;
+
+        return !sizeChanges && (requested is null || requested.Keys.All(SiteOnlyProperties.Contains));
     }
 
     public static void ValidateObjectPatch(PatchDocument patch, bool allowFormSitePatch = false, string? formName = null)
@@ -1182,7 +1214,14 @@ internal static class RebuildPatchApplier
                 props["groupId"] = RequireUInt16(controlName, propertyName, value);
                 break;
             case "fontbold":
-                props["fontBold"] = RequireBoolean(controlName, propertyName, value);
+                var bold = RequireBoolean(controlName, propertyName, value);
+                props["fontBold"] = bold;
+                // The file stores a weight, so that is what must change.
+                if (bold != (TryGetInt(props, "fontWeight", out var currentWeight) && currentWeight >= MinimumBoldWeight))
+                {
+                    props["fontWeight"] = bold ? 700 : 400;
+                }
+
                 break;
             case "fontitalic":
                 props["fontItalic"] = RequireBoolean(controlName, propertyName, value);
@@ -1424,23 +1463,21 @@ internal static class RebuildPatchApplier
         props["imeMode"] = imeMode;
     }
 
-    private static uint DefaultVariousPropertyBits(Dictionary<string, object?> props) =>
-        TryGetString(props, "parser", out var parser) && parser.Equals("msOFormsLabel", StringComparison.OrdinalIgnoreCase)
-            ? 0x0080_0013u
-            : IsTextBox(props)
-                ? 0x2C80_481Bu
-            : IsControlType(props, "CheckBox")
-                ? 0x2C80_081Bu
-            : IsControlType(props, "OptionButton")
-                ? 0x0080_001Bu
-            : 0x0000_001Bu;
+    /// <summary>The value a control has when its stream stores none, per [MS-OFORMS].</summary>
+    private static uint DefaultVariousPropertyBits(Dictionary<string, object?> props)
+    {
+        if (!TryGetString(props, "parser", out var parser))
+        {
+            return 0x0000_001Bu;
+        }
 
-    private static bool IsTextBox(Dictionary<string, object?> props) =>
-        IsControlType(props, "TextBox");
-
-    private static bool IsControlType(Dictionary<string, object?> props, string type) =>
-        TryGetString(props, "controlType", out var controlType) &&
-        controlType.Equals(type, StringComparison.OrdinalIgnoreCase);
+        return parser.ToLowerInvariant() switch
+        {
+            "msoformslabel" => 0x0080_0013u,
+            "msoformsmorphdata" => MsFormsFactoryBinary.MorphDataDefaultVariousBits,
+            _ => 0x0000_001Bu,
+        };
+    }
 
     private static void SetSiteFlag(Dictionary<string, object?> props, string propertyName, bool value)
     {

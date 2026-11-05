@@ -164,7 +164,7 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
         }
 
         var targetLayout = patch is null
-            ? sourceLayout
+            ? sourceLayout.KeepingAllControlBytes()
             : RebuildPatchApplier.ApplyObjectPropertyPatch(sourceLayout, patch, allowFormSitePatch: streamMode == RebuildStreamMode.FormAndObjectPatch, formName: project.FormName, patchDir: parsed.GetOption("patch") is not null ? Path.GetDirectoryName(Path.GetFullPath(parsed.GetOption("patch")!)) : null);
         if (patch is not null)
         {
@@ -186,7 +186,12 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
             updatedFrm = UserFormProject.ReplaceOleObjectBlob(updatedFrm, Path.GetFileName(outFrxPath));
             updatedFrm = ApplyVbaFile(updatedFrm, patchPath, frmPath, project.Encoding);
             updatedFrm = VbaCodeGenerator.Apply(updatedFrm, patch?.Code);
-            updatedFrm = UserFormProject.SynchronizeFormProperties(updatedFrm, targetLayout.FrxFormControl);
+            // The applier makes a new dictionary only if the patch changes the form itself.
+            if (!ReferenceEquals(targetLayout.FrxFormControl, sourceLayout.FrxFormControl))
+            {
+                updatedFrm = UserFormProject.SynchronizeFormProperties(updatedFrm, targetLayout.FrxFormControl);
+            }
+
             File.WriteAllText(stagedFrmPath, updatedFrm, project.Encoding);
             var removedScopeNames = targetLayout.RemovedControls?.Select(control => control.Name).ToList() ?? patch?.Remove;
             UserFormProject.WriteScopesCopy(stagedFrmPath, project.ControlScopes, patch?.Renames, removedScopeNames);
@@ -214,6 +219,8 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
 
             var failedChanges = BuildVerification.FindFailedChanges(patch, comparison.Differences)
                 .Concat(BuildVerification.FindLostSiteFlags(patch, rebuiltLayout.Controls))
+                .Concat(BuildVerification.FindUnrequestedChanges(targetLayout, rebuiltLayout, patch))
+                .Distinct()
                 .ToList();
             if (failedChanges.Count > 0)
             {

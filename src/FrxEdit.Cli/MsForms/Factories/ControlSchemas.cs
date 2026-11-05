@@ -472,7 +472,7 @@ internal abstract class MorphButtonControlSchema : IGeneratedControlSchema
     private const uint PersistedForeColor = 0x8000_0012;
     private const uint FileDefaultForeColor = 0x8000_0008;
     private const uint DefaultPicturePosition = 0x0007_0001;
-    private const int DefaultSpecialEffect = 0;
+    private const int DefaultSpecialEffect = 2;
 
     public abstract string Type { get; }
     public uint SiteFlags => 0x0000_0013; // tabStop + visible + streamed.
@@ -498,8 +498,11 @@ internal abstract class MorphButtonControlSchema : IGeneratedControlSchema
         var accelerator = MsFormsFactoryBinary.GetString(request.Properties, "accelerator");
         var groupName = MsFormsFactoryBinary.GetString(request.Properties, "groupName") ?? string.Empty;
         var groupNameBytes = Encoding.Latin1.GetBytes(groupName);
-        var propMask = BuildPropMask(valueBytes.Length, captionBytes.Length, groupNameBytes.Length, backColor, foreColor, variousBits,
-            mousePointer, multiSelect, picturePosition, specialEffect, accelerator);
+        var propMask = MsFormsFactoryBinary.WithVariousBitsField(
+            BuildPropMask(valueBytes.Length, captionBytes.Length, groupNameBytes.Length, backColor, foreColor, variousBits,
+                mousePointer, multiSelect, picturePosition, specialEffect, accelerator),
+            request.Properties,
+            variousBits);
 
         using var dataBlock = new MemoryStream();
         WriteDataBlock(dataBlock, propMask, valueBytes, captionBytes, groupNameBytes, backColor, foreColor, variousBits,
@@ -611,7 +614,7 @@ internal abstract class MorphButtonControlSchema : IGeneratedControlSchema
 
     private uint BuildVariousPropertyBits(Dictionary<string, object?> properties)
     {
-        var bits = DefaultVariousPropertyBits;
+        var bits = MsFormsFactoryBinary.StartingVariousBits(properties, DefaultVariousPropertyBits);
         SetBit(ref bits, 1, MsFormsFactoryBinary.GetBool(properties, "enabled"));
         SetBit(ref bits, 2, MsFormsFactoryBinary.GetBool(properties, "locked"));
         if (MsFormsFactoryBinary.GetInt32(properties, "backStyle") is int backStyle) SetBit(ref bits, 3, backStyle != 0);
@@ -719,14 +722,22 @@ internal abstract class MorphListControlSchema : IGeneratedControlSchema
         var multiSelect = SupportsMultiSelect ? MsFormsFactoryBinary.GetInt32(request.Properties, "multiSelect") ?? 0 : 0;
         var specialEffect = MsFormsFactoryBinary.GetInt32(request.Properties, "specialEffect") ?? DefaultSpecialEffect;
 
-        var propMask = BuildPropMask(valueBytes.Length, backColor, foreColor, borderColor, variousBits, maxLength, borderStyle, scrollBars,
-            displayStyle, mousePointer, listWidth, boundColumn, textColumn, columnCount, listRows, matchEntry, listStyle,
-            showDropButtonWhen, dropButtonStyle, multiSelect, specialEffect);
+        var columnInfoCount = MsFormsFactoryBinary.GetInt32(request.Properties, "cColumnInfo") ?? 0;
+        var propMask = MsFormsFactoryBinary.WithVariousBitsField(
+            BuildPropMask(valueBytes.Length, backColor, foreColor, borderColor, variousBits, maxLength, borderStyle, scrollBars,
+                displayStyle, mousePointer, listWidth, boundColumn, textColumn, columnCount, listRows, matchEntry, listStyle,
+                showDropButtonWhen, dropButtonStyle, multiSelect, specialEffect),
+            request.Properties,
+            variousBits);
+        if (columnInfoCount > 0)
+        {
+            propMask |= 1ul << 15;
+        }
 
         using var dataBlock = new MemoryStream();
         WriteDataBlock(dataBlock, propMask, valueBytes, backColor, foreColor, borderColor, variousBits, maxLength, borderStyle, scrollBars,
             displayStyle, mousePointer, listWidth, boundColumn, textColumn, columnCount, listRows, matchEntry, listStyle,
-            showDropButtonWhen, dropButtonStyle, multiSelect, specialEffect);
+            showDropButtonWhen, dropButtonStyle, multiSelect, specialEffect, columnInfoCount);
         using var extra = new MemoryStream();
         MsFormsFactoryBinary.WriteSize(extra, request.Width, request.Height);
         if (valueBytes.Length > 0)
@@ -809,7 +820,7 @@ internal abstract class MorphListControlSchema : IGeneratedControlSchema
 
     protected virtual uint BuildVariousPropertyBits(Dictionary<string, object?> properties)
     {
-        var bits = DefaultVariousPropertyBits;
+        var bits = MsFormsFactoryBinary.StartingVariousBits(properties, DefaultVariousPropertyBits);
         SetBit(ref bits, 1, MsFormsFactoryBinary.GetBool(properties, "enabled"));
         SetBit(ref bits, 2, MsFormsFactoryBinary.GetBool(properties, "locked"));
         if (MsFormsFactoryBinary.GetInt32(properties, "backStyle") is int backStyle) SetBit(ref bits, 3, backStyle != 0);
@@ -867,7 +878,7 @@ internal abstract class MorphListControlSchema : IGeneratedControlSchema
     private static void WriteDataBlock(Stream dataBlock, ulong mask, byte[] valueBytes, uint backColor, uint foreColor, uint borderColor,
         uint variousBits, int maxLength, int borderStyle, int scrollBars, int displayStyle, int mousePointer, int listWidth,
         int boundColumn, int textColumn, int columnCount, int listRows, int matchEntry, int listStyle, int showDropButtonWhen,
-        int dropButtonStyle, int multiSelect, int specialEffect)
+        int dropButtonStyle, int multiSelect, int specialEffect, int columnInfoCount = 0)
     {
         if (Has(mask, 0)) MsFormsFactoryBinary.WriteUInt32(dataBlock, variousBits);
         if (Has(mask, 1)) MsFormsFactoryBinary.WriteUInt32(dataBlock, backColor);
@@ -882,6 +893,7 @@ internal abstract class MorphListControlSchema : IGeneratedControlSchema
         if (Has(mask, 12)) { MsFormsFactoryBinary.WritePadding(dataBlock, 2); MsFormsFactoryBinary.WriteInt16(dataBlock, textColumn); }
         if (Has(mask, 13)) { MsFormsFactoryBinary.WritePadding(dataBlock, 2); MsFormsFactoryBinary.WriteInt16(dataBlock, columnCount); }
         if (Has(mask, 14)) { MsFormsFactoryBinary.WritePadding(dataBlock, 2); MsFormsFactoryBinary.WriteUInt16(dataBlock, listRows); }
+        if (Has(mask, 15)) { MsFormsFactoryBinary.WritePadding(dataBlock, 2); MsFormsFactoryBinary.WriteUInt16(dataBlock, columnInfoCount); }
         if (Has(mask, 16)) dataBlock.WriteByte(checked((byte)matchEntry));
         if (Has(mask, 17)) dataBlock.WriteByte(checked((byte)listStyle));
         if (Has(mask, 18)) dataBlock.WriteByte(checked((byte)showDropButtonWhen));

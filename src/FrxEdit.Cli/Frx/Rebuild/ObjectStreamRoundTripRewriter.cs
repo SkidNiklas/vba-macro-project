@@ -56,7 +56,7 @@ internal static class ObjectStreamRoundTripRewriter
                 continue;
             }
 
-            var rewritten = RewriteObjectStream(stream.Path, stream.Data, streamsByPath, slices ?? [], additions ?? [], removals ?? [], mode, sizeUpdates);
+            var rewritten = RewriteObjectStream(stream.Path, stream.Data, streamsByPath, slices ?? [], additions ?? [], removals ?? [], mode, sizeUpdates, layout.ControlsWithUnchangedObject);
             rewrittenObjectStreams[stream.Path] = rewritten;
         }
 
@@ -108,7 +108,7 @@ internal static class ObjectStreamRoundTripRewriter
                 if (mode == ObjectStreamRewriteMode.FormAndObjectPatch && (hasTargetControls || hasRemovedControls))
                 {
                     updatesByFormStreamPath.TryGetValue(stream.Path, out var updates);
-                    patched = RewriteFormSiteData(stream with { Data = patched }, streamsByPath, controls ?? [], updates ?? [], removedControls ?? []);
+                    patched = RewriteFormSiteData(stream with { Data = patched }, streamsByPath, controls ?? [], updates ?? [], removedControls ?? [], layout.ControlsWithUnchangedSite);
                     changed = true;
                 }
                 else if (updatesByFormStreamPath.TryGetValue(stream.Path, out var updates))
@@ -756,7 +756,8 @@ internal static class ObjectStreamRoundTripRewriter
         IReadOnlyDictionary<string, StorageEntryDump> streamsByPath,
         IReadOnlyList<ControlInfo> controls,
         IReadOnlyList<ObjectStreamSizeUpdate> sizeUpdates,
-        IReadOnlyList<ControlInfo> removedControls)
+        IReadOnlyList<ControlInfo> removedControls,
+        IReadOnlySet<string>? unchangedSites)
     {
         var original = formStream.Data;
         var slices = BuildFormSiteSlices(formStream, controls);
@@ -844,7 +845,9 @@ internal static class ObjectStreamRoundTripRewriter
             objectSizeUpdatesByControl.TryGetValue(slice.Control.Name, out var newObjectSize);
             var sourceFormStream = ResolveSourceStream(streamsByPath, slice.SourceStreamPath, formStream.Path, $"site slice for '{slice.Control.Name}'");
             var sourceSiteData = sourceFormStream.Data.AsSpan(slice.Start, slice.Size);
-            var sitePayload = SerializeFormSite(slice.Control, sourceFormStream, sourceSiteData, slice.Start, newObjectSize);
+            var sitePayload = newObjectSize == 0 && unchangedSites?.Contains(slice.Control.Name) == true
+                ? sourceSiteData.ToArray()
+                : SerializeFormSite(slice.Control, sourceFormStream, sourceSiteData, slice.Start, newObjectSize);
             totalDelta += sitePayload.Length - slice.Size;
             output.Write(sitePayload, 0, sitePayload.Length);
             cursor = slice.Start + slice.Size;
@@ -893,10 +896,13 @@ internal static class ObjectStreamRoundTripRewriter
             PatchSiteDataCountOfSites(rebuilt, referenceControl, countDelta, formStream.Path);
         }
 
-        PatchNextAvailableId(rebuilt, allOriginalSlices
-            .Where(slice => !slice.IsRemoval)
-            .Select(slice => slice.Control)
-            .Concat(additions.Select(addition => addition.Control)));
+        if (additions.Count > 0)
+        {
+            PatchNextAvailableId(rebuilt, allOriginalSlices
+                .Where(slice => !slice.IsRemoval)
+                .Select(slice => slice.Control)
+                .Concat(additions.Select(addition => addition.Control)));
+        }
 
         return rebuilt;
     }
@@ -1220,7 +1226,9 @@ internal static class ObjectStreamRoundTripRewriter
             return;
         }
 
-        BinaryPrimitives.WriteUInt32LittleEndian(formStream.AsSpan(offset, 4), checked((uint)(maxId + 1)));
+        // Only ever raise it. A lower value could hand out an ID that is already in use.
+        var current = BinaryPrimitives.ReadUInt32LittleEndian(formStream.AsSpan(offset, 4));
+        BinaryPrimitives.WriteUInt32LittleEndian(formStream.AsSpan(offset, 4), Math.Max(current, checked((uint)(maxId + 1))));
     }
 
     private static bool TryFindNextAvailableIdLocalOffset(byte[] formStream, out int offset)
@@ -2128,7 +2136,8 @@ internal static class ObjectStreamRoundTripRewriter
         IReadOnlyList<ObjectStreamSlice> additions,
         IReadOnlyList<ObjectStreamSlice> removals,
         ObjectStreamRewriteMode mode,
-        List<ObjectStreamSizeUpdate> sizeUpdates)
+        List<ObjectStreamSizeUpdate> sizeUpdates,
+        IReadOnlySet<string>? unchangedControls)
     {
         using var output = new MemoryStream(original.Length);
         var cursor = 0;
@@ -2168,7 +2177,7 @@ internal static class ObjectStreamRoundTripRewriter
             }
 
             var originalPayload = sourceObjectStream.Data.AsSpan(slice.Start, slice.Size);
-            var payload = mode switch
+            var payload = unchangedControls?.Contains(slice.Control.Name) == true ? originalPayload.ToArray() : mode switch
             {
                 ObjectStreamRewriteMode.ActiveSerializeFixed => ObjectPayloadSerializer.SerializeFixedLength(slice.Control, originalPayload),
                 ObjectStreamRewriteMode.NormalizeStrings => ObjectPayloadSerializer.SerializeNormalizedStrings(slice.Control, originalPayload),

@@ -1,5 +1,61 @@
 internal static class MsFormsFactoryBinary
 {
+    /// <summary>VariousPropertyBits of a MorphData control whose stream stores none, per [MS-OFORMS] 2.2.5.2.</summary>
+    public const uint MorphDataDefaultVariousBits = 0x2C80_081B;
+
+    /// <summary>A value that may be above int.MaxValue, so GetInt32 won't do.</summary>
+    public static uint? GetUInt32(Dictionary<string, object?> properties, string name)
+    {
+        if (!properties.TryGetValue(name, out var value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            uint unsigned => unsigned,
+            int signed => unchecked((uint)signed),
+            long wide when wide is >= 0 and <= uint.MaxValue => (uint)wide,
+            JsonElement element when element.ValueKind == JsonValueKind.Number && element.TryGetUInt32(out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    /// <summary>The bits of the source stream's MorphData PropMask, or null for a control that has no source stream.</summary>
+    public static ulong? GetSourcePropMask(Dictionary<string, object?> properties)
+    {
+        var text = GetString(properties, "propMask");
+        return text is not null && text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+               ulong.TryParse(text.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var mask)
+            ? mask
+            : null;
+    }
+
+    /// <summary>
+    /// The start value for a MorphData control's VariousPropertyBits: what the source stream stored, the documented
+    /// default if it stored none, or the given value for a new control.
+    /// </summary>
+    public static uint StartingVariousBits(Dictionary<string, object?> properties, uint forNewControl)
+    {
+        if (GetUInt32(properties, "variousPropertyBitsRaw") is uint stored)
+        {
+            return stored;
+        }
+
+        return GetSourcePropMask(properties) is ulong mask && (mask & 1) == 0 ? MorphDataDefaultVariousBits : forNewControl;
+    }
+
+    /// <summary>A rebuilt control stores VariousPropertyBits if its source did, or if the value now differs from the default.</summary>
+    public static ulong WithVariousBitsField(ulong propMask, Dictionary<string, object?> properties, uint variousBits)
+    {
+        if (GetSourcePropMask(properties) is not ulong source)
+        {
+            return propMask;
+        }
+
+        return (source & 1) != 0 || variousBits != MorphDataDefaultVariousBits ? propMask | 1 : propMask & ~1ul;
+    }
+
     public static byte[] BuildVersionedControl(byte minor, byte major, uint propMask, byte[] dataBlock, byte[] extraBlock)
     {
         using var output = new MemoryStream();

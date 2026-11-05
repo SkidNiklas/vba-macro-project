@@ -93,7 +93,7 @@ internal static class ObjectPayloadSerializer
             TryGetString(control.Properties, "parser", out var morphListParser) &&
             morphListParser.Equals("msOFormsMorphData", StringComparison.OrdinalIgnoreCase))
         {
-            return SerializeMorphListRebuilt(control);
+            return SerializeMorphListRebuilt(control, original);
         }
 
         if ((control.Type.Equals("CheckBox", StringComparison.OrdinalIgnoreCase) ||
@@ -275,7 +275,7 @@ internal static class ObjectPayloadSerializer
         if (hasCaption) propMask |= 1u << 3;
         if (foreColor != defaultForeColor) propMask |= 1u << 0;
         if (backColor != defaultBackColor) propMask |= 1u << 1;
-        if (various != defaultVarious) propMask |= 1u << 2;
+        if (various != defaultVarious || SourceStores(props, 2)) propMask |= 1u << 2;
         if (picturePosition != defaultPicturePosition) propMask |= 1u << 4;
         if (mousePointer != 0) propMask |= 1u << 6;
         if (!string.IsNullOrEmpty(accelerator)) propMask |= 1u << 8;
@@ -403,7 +403,7 @@ internal static class ObjectPayloadSerializer
         if (hasCaption) propMask |= 1u << 3;
         if (foreColor != defaultForeColor) propMask |= 1u << 0;
         if (backColor != defaultBackColor) propMask |= 1u << 1;
-        if (various != defaultVarious) propMask |= 1u << 2;
+        if (various != defaultVarious || SourceStores(props, 2)) propMask |= 1u << 2;
         if (picturePosition != defaultPicturePosition) propMask |= 1u << 4;
         if (mousePointer != 0) propMask |= 1u << 6;
         if (borderColor != defaultBorderColor) propMask |= 1u << 7;
@@ -495,9 +495,7 @@ internal static class ObjectPayloadSerializer
         var borderColor = TryGetString(props, "borderColor", out var borderColorText) && TryParseVbaColor(borderColorText, out var parsedBorder)
             ? parsedBorder
             : defaultBorderColor;
-        var various = TryGetInt(props, "variousPropertyBitsRaw", out var variousRaw)
-            ? unchecked((uint)variousRaw)
-            : defaultVarious;
+        var various = MsFormsFactoryBinary.StartingVariousBits(props, defaultVarious);
         var maxLength = TryGetInt(props, "maxLength", out var maxLengthRaw) ? maxLengthRaw : 0;
         var borderStyle = TryGetInt(props, "borderStyle", out var borderStyleRaw) ? borderStyleRaw : defaultBorderStyle;
         var scrollBars = TryGetInt(props, "scrollBars", out var scrollBarsRaw) ? scrollBarsRaw : 0;
@@ -522,8 +520,10 @@ internal static class ObjectPayloadSerializer
             propMask |= oldMask & ((1ul << 27) | (1ul << 28));
         }
 
+        propMask = MsFormsFactoryBinary.WithVariousBitsField(propMask, props, various);
+
         using var dataBlock = new MemoryStream();
-        WriteUInt32(dataBlock, various);
+        if ((propMask & 1) != 0) WriteUInt32(dataBlock, various);
         if ((propMask & (1ul << 1)) != 0) WriteUInt32(dataBlock, backColor);
         if ((propMask & (1ul << 2)) != 0) WriteUInt32(dataBlock, foreColor);
         if ((propMask & (1ul << 3)) != 0) WriteUInt32(dataBlock, unchecked((uint)maxLength));
@@ -590,7 +590,7 @@ internal static class ObjectPayloadSerializer
         return output.ToArray();
     }
 
-    private static byte[] SerializeMorphListRebuilt(ControlInfo control)
+    private static byte[] SerializeMorphListRebuilt(ControlInfo control, ReadOnlySpan<byte> original)
     {
         var props = control.Properties!;
         IGeneratedControlSchema schema = control.Type.Equals("ComboBox", StringComparison.OrdinalIgnoreCase)
@@ -608,15 +608,25 @@ internal static class ObjectPayloadSerializer
             Caption: null,
             Value: TryGetString(props, "value", out var value) ? value : null,
             Properties: props);
-        return schema.BuildObjectPayload(request);
+        var payload = schema.BuildObjectPayload(request);
+
+        // rgColumnInfo follows TextProps and holds what the schema doesn't model, such as the column widths.
+        return TryGetInt(props, "columnInfoLocalOffset", out var columnStart) &&
+               TryGetInt(props, "columnInfoEndLocalOffset", out var columnEnd) &&
+               columnStart >= 0 && columnEnd >= columnStart && columnEnd <= original.Length
+            ? [.. payload, .. original[columnStart..columnEnd]]
+            : payload;
     }
 
     private static byte[] SerializeMorphButtonRebuilt(ControlInfo control)
     {
         var props = control.Properties!;
-        IGeneratedControlSchema schema = control.Type.Equals("CheckBox", StringComparison.OrdinalIgnoreCase)
-            ? new CheckBoxControlSchema()
-            : new OptionButtonControlSchema();
+        IGeneratedControlSchema schema = control.Type.ToLowerInvariant() switch
+        {
+            "checkbox" => new CheckBoxControlSchema(),
+            "togglebutton" => new ToggleButtonControlSchema(),
+            _ => new OptionButtonControlSchema(),
+        };
         var request = new GeneratedControlRequest(
             control.Type,
             control.Name,
@@ -669,7 +679,7 @@ internal static class ObjectPayloadSerializer
         if (TryGetString(props, "picture", out var _)) propMask |= 1u << 10;
         if (pictureAlignment != 2) propMask |= 1u << 11;
         if (pictureTiling) propMask |= 1u << 12;
-        if (various != defaultVarious) propMask |= 1u << 13;
+        if (various != defaultVarious || SourceStores(props, 13)) propMask |= 1u << 13;
         if (TryGetString(props, "mouseIcon", out var _)) propMask |= 1u << 14;
 
         using var dataBlock = new MemoryStream();
@@ -762,7 +772,7 @@ internal static class ObjectPayloadSerializer
         uint propMask = 0x0000_0008; // fSize (bit 3)
         if (foreColor != defaultForeColor) propMask |= 1u << 0;
         if (backColor != defaultBackColor) propMask |= 1u << 1;
-        if (various != defaultVarious) propMask |= 1u << 2;
+        if (various != defaultVarious || SourceStores(props, 2)) propMask |= 1u << 2;
         if (mousePointer != 0) propMask |= 1u << 4;
         if (min != 0) propMask |= 1u << 5;
         if (max != 32767) propMask |= 1u << 6;
@@ -842,7 +852,7 @@ internal static class ObjectPayloadSerializer
         uint propMask = 0x0000_0008; // fSize (bit 3)
         if (foreColor != defaultForeColor) propMask |= 1u << 0;
         if (backColor != defaultBackColor) propMask |= 1u << 1;
-        if (various != defaultVarious) propMask |= 1u << 2;
+        if (various != defaultVarious || SourceStores(props, 2)) propMask |= 1u << 2;
         if (min != 0) propMask |= 1u << 5;
         if (max != 100) propMask |= 1u << 6;
         if (position != 0) propMask |= 1u << 7;
@@ -1226,6 +1236,10 @@ internal static class ObjectPayloadSerializer
 
         BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(localOffset, 2), unchecked((ushort)next));
     }
+
+    /// <summary>True if the source stream stored this field, even with its default value. Then the rebuilt one does too.</summary>
+    private static bool SourceStores(Dictionary<string, object?> props, int bit) =>
+        TryGetString(props, "propMask", out var text) && TryParseHexUInt32(text, out var mask) && (mask & (1u << bit)) != 0;
 
     private static int Align4(int value) => (value + 3) & ~3;
 

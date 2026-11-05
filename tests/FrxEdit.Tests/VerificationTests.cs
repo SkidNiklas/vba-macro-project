@@ -238,6 +238,12 @@ public class VerificationTests
         return form;
     }
 
+    internal static LayoutInspection SampleLayout()
+    {
+        var project = UserFormProject.Load(SampleForm());
+        return FrxBinary.Read(project.FrxPath).Inspect(project.KnownControlNames, project.ControlScopes, ParserMode.Tolerant, project.FormProperties);
+    }
+
     internal static string SampleForm()
     {
         var folder = new DirectoryInfo(AppContext.BaseDirectory);
