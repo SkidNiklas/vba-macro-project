@@ -100,7 +100,7 @@ try {
             $typeName = [Microsoft.VisualBasic.Information]::TypeName($control)
             [void] $controls.Add((Get-ControlRecord $control $typeName (Get-ParentName $control $formName)))
 
-            if ($typeName -eq 'MultiPage') {
+            if ($typeName -in 'MultiPage', 'IMultiPage') {
                 foreach ($page in $control.Pages) {
                     [void] $controls.Add((Get-ControlRecord $page 'Page' ([string] $control.Name)))
                 }
