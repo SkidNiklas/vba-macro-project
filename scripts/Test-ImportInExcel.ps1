@@ -43,14 +43,41 @@ $vbextMsForm = 3
 $msoAutomationSecurityForceDisable = 3
 $xlDoNotUpdateLinks = 0
 
+function Get-OptionalValue([scriptblock] $read) {
+    # Not every control type has every property.
+    try { return [string] (& $read) } catch { return '(none)' }
+}
+
 function Get-DesignerControls($component) {
     @($component.Designer.Controls | ForEach-Object {
+        $control = $_
         [ordered]@{
-            name   = [string] $_.Name
-            left   = [math]::Round([double] $_.Left, 2)
-            top    = [math]::Round([double] $_.Top, 2)
-            width  = [math]::Round([double] $_.Width, 2)
-            height = [math]::Round([double] $_.Height, 2)
+            name        = [string] $control.Name
+            left        = [math]::Round([double] $control.Left, 2)
+            top         = [math]::Round([double] $control.Top, 2)
+            width       = [math]::Round([double] $control.Width, 2)
+            height      = [math]::Round([double] $control.Height, 2)
+            caption     = Get-OptionalValue { $control.Caption }
+            value       = Get-OptionalValue { $control.Value }
+            tag         = Get-OptionalValue { $control.Tag }
+            tip         = Get-OptionalValue { $control.ControlTipText }
+            visible     = Get-OptionalValue { $control.Visible }
+            enabled     = Get-OptionalValue { $control.Enabled }
+            locked      = Get-OptionalValue { $control.Locked }
+            tabIndex    = Get-OptionalValue { $control.TabIndex }
+            tabStop     = Get-OptionalValue { $control.TabStop }
+            foreColor   = Get-OptionalValue { $control.ForeColor }
+            backColor   = Get-OptionalValue { $control.BackColor }
+            backStyle   = Get-OptionalValue { $control.BackStyle }
+            borderStyle = Get-OptionalValue { $control.BorderStyle }
+            effect      = Get-OptionalValue { $control.SpecialEffect }
+            textAlign   = Get-OptionalValue { $control.TextAlign }
+            wordWrap    = Get-OptionalValue { $control.WordWrap }
+            autoSize    = Get-OptionalValue { $control.AutoSize }
+            fontName    = Get-OptionalValue { $control.Font.Name }
+            fontSize    = Get-OptionalValue { $control.Font.Size }
+            fontBold    = Get-OptionalValue { $control.Font.Bold }
+            fontItalic  = Get-OptionalValue { $control.Font.Italic }
         }
     })
 }
@@ -62,15 +89,20 @@ function Compare-Controls($before, $after) {
     foreach ($control in $before) {
         $other = $afterByName[$control.name]
         if ($null -eq $other) { [void] $differences.Add("missing: $($control.name)"); continue }
-        foreach ($property in 'left', 'top', 'width', 'height') {
-            if ([math]::Abs($control[$property] - $other[$property]) -gt 0.1) {
-                [void] $differences.Add("$($control.name).${property}: $($control[$property]) -> $($other[$property])")
+        foreach ($property in @($control.Keys)) {
+            $different = if ($property -in 'left', 'top', 'width', 'height') {
+                [math]::Abs($control[$property] - $other[$property]) -gt 0.1
+            } else {
+                $control[$property] -cne $other[$property]
+            }
+            if ($different) {
+                [void] $differences.Add("$($control.name).${property}: '$($control[$property])' -> '$($other[$property])'")
             }
         }
         $afterByName.Remove($control.name)
     }
     foreach ($name in $afterByName.Keys) { [void] $differences.Add("unexpected: $name") }
-    return ,$differences
+    return $differences
 }
 
 function Save-WindowPicture([IntPtr] $handle, [string] $path) {
