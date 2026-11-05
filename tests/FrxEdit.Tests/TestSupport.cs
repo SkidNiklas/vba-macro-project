@@ -189,13 +189,30 @@ internal static class Facit
 
         return entry.GetProperty("controls").EnumerateArray().Select(control => new FacitControl(
             control.GetProperty("name").GetString()!,
-            control.GetProperty("type").GetString()!,
-            control.GetProperty("parent").GetString(),
+            NormalizeType(control.GetProperty("type").GetString()!),
+            // The export writes an empty string for a control directly on the form.
+            control.GetProperty("parent").GetString() is { Length: > 0 } parent ? parent : null,
             control.GetProperty("left").GetDouble(),
             control.GetProperty("top").GetDouble(),
             control.GetProperty("width").GetDouble(),
             control.GetProperty("height").GetDouble())).ToList();
     }
+
+    /// <summary>Through COM, TypeName returns the interface name, such as IMdcText for a TextBox.</summary>
+    private static string NormalizeType(string type) => type switch
+    {
+        "ICommandButton" => "CommandButton",
+        "ILabelControl" => "Label",
+        "IMdcText" => "TextBox",
+        "IMdcCombo" => "ComboBox",
+        "IMdcList" => "ListBox",
+        "IMdcCheckBox" => "CheckBox",
+        "IMdcOptionButton" => "OptionButton",
+        "IMdcToggleButton" => "ToggleButton",
+        "IOptionFrame" => "Frame",
+        "IMultiPage" => "MultiPage",
+        _ => type,
+    };
 }
 
 internal sealed record FacitControl(string Name, string Type, string? Parent, double Left, double Top, double Width, double Height);
