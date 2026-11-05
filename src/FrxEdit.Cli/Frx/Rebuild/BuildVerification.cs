@@ -28,6 +28,25 @@ internal static partial class BuildVerification
             $"Missing: [{string.Join(", ", missing)}]. Unexpected: [{string.Join(", ", unexpected)}]. No output was written.");
     }
 
+    /// <summary>Controls found by guessing names from raw bytes, because the parser could not read their stream.</summary>
+    public static IReadOnlyList<string> FindGuessedControls(LayoutInspection layout) =>
+        layout.Controls
+            .Where(control => control.Properties is null || control.Properties.ContainsKey("legacyScanner"))
+            .Select(control => control.Name)
+            .ToList();
+
+    /// <summary>Guessed names and sizes can't be trusted, so a form that needs them must not be rebuilt.</summary>
+    public static void ThrowIfControlsAreGuessed(LayoutInspection layout)
+    {
+        var guessed = FindGuessedControls(layout);
+        if (guessed.Count > 0)
+        {
+            throw new CliException(
+                $"This form can't be rebuilt safely: the parser could not read {guessed.Count} controls, and their names were guessed from raw bytes: " +
+                $"[{string.Join(", ", guessed)}]. No output was written.");
+        }
+    }
+
     /// <summary>Differences that mean a patched value, or a control's place in the form, did not survive the rebuild.</summary>
     public static IReadOnlyList<string> FindFailedChanges(PatchDocument? patch, IEnumerable<string> differences)
     {

@@ -79,6 +79,12 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
         var project = UserFormProject.Load(frmPath);
         var parserMode = parsed.GetParserModeOption("mode", ParserMode.Tolerant);
         var layout = FrxBinary.Read(project.FrxPath).Inspect(project.KnownControlNames, project.ControlScopes, parserMode, project.FormProperties);
+        var guessed = BuildVerification.FindGuessedControls(layout);
+        if (guessed.Count > 0)
+        {
+            stderr.WriteLine($"warning: names, sizes and the number of controls may be wrong: these were guessed from raw bytes: [{string.Join(", ", guessed)}]");
+        }
+
         var rawDocument = new LayoutDocument(
             project.FormName,
             Path.GetFileName(project.FrxPath),
@@ -150,6 +156,7 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
         // Validate the source first. This keeps the rebuilder deliberately conservative:
         // it only round-trips FRX files that the documented parser already understands.
         var sourceLayout = source.Inspect(project.KnownControlNames, project.ControlScopes, parserMode, project.FormProperties);
+        BuildVerification.ThrowIfControlsAreGuessed(sourceLayout);
         if (patch is not null)
         {
             PatchValidator.Validate(patch, sourceLayout.Controls, formName: project.FormName);
@@ -188,6 +195,7 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
             var rebuilt = FrxBinary.Read(rebuiltProject.FrxPath);
             var rebuiltLayout = rebuilt.Inspect(rebuiltProject.KnownControlNames, rebuiltProject.ControlScopes, parserMode, rebuiltProject.FormProperties);
 
+            BuildVerification.ThrowIfControlsAreGuessed(rebuiltLayout);
             BuildVerification.ThrowIfControlsDiffer(
                 sourceLayout.Controls.Select(control => control.Name),
                 patch,
