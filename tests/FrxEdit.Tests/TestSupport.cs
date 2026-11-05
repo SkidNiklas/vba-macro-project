@@ -211,6 +211,7 @@ internal static class Facit
         "IMdcToggleButton" => "ToggleButton",
         "IOptionFrame" => "Frame",
         "IMultiPage" => "MultiPage",
+        "IListView" or "ITreeView" or "IProgressBar" => "ActiveX",
         _ => type,
     };
 }

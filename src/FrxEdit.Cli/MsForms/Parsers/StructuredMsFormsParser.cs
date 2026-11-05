@@ -212,7 +212,7 @@ internal static class StructuredMsFormsParser
 
         var emittedSiteCount = sites.Count(s => !s.IsInternalSite);
         var validNameCount = sites.Count(s => s.IsInternalSite || !string.IsNullOrWhiteSpace(s.Name));
-        var knownTypeCount = sites.Count(s => IsKnownOrClassTableType(s.ClsidCacheIndex, classTable));
+        var knownTypeCount = sites.Count(s => IsKnownOrClassTableType(s.ClsidCacheIndex));
         var plausiblePositionCount = sites.Count(s => s.Left is >= -200_000 and <= 200_000 && s.Top is >= -200_000 and <= 200_000);
         var internalSiteBonus = sites.Count(s => s.IsInternalSite) * 3;
         var score = validNameCount * 10 + knownTypeCount * 10 + plausiblePositionCount * 5 + emittedSiteCount + internalSiteBonus;
@@ -559,7 +559,7 @@ internal static class StructuredMsFormsParser
         var isInternalUnnamedSite = string.IsNullOrWhiteSpace(site.Name) &&
             !mask.HasName &&
             site.ObjectStreamSize is > 0 &&
-            IsKnownOrClassTableType(site.ClsidCacheIndex, classTable);
+            IsKnownOrClassTableType(site.ClsidCacheIndex);
 
         if (isInternalUnnamedSite)
         {
@@ -569,7 +569,7 @@ internal static class StructuredMsFormsParser
             site.ExtraProperties["internalSiteReason"] = "unnamed object-stream site";
         }
 
-        if ((!isInternalUnnamedSite && string.IsNullOrWhiteSpace(site.Name)) || !IsKnownOrClassTableType(site.ClsidCacheIndex, classTable))
+        if ((!isInternalUnnamedSite && string.IsNullOrWhiteSpace(site.Name)) || !IsKnownOrClassTableType(site.ClsidCacheIndex))
         {
             return false;
         }
@@ -603,7 +603,7 @@ internal static class StructuredMsFormsParser
     }
 
 
-    private static bool IsKnownOrClassTableType(ushort? clsidCacheIndex, IReadOnlyList<ClassTableEntry> classTable)
+    private static bool IsKnownOrClassTableType(ushort? clsidCacheIndex)
     {
         if (clsidCacheIndex is not { } value)
         {
@@ -615,7 +615,8 @@ internal static class StructuredMsFormsParser
             return true;
         }
 
-        return value >= 0x8000 && value - 0x8000 < classTable.Count;
+        // Not limited to this stream's own table: a control on a nested container can use the root form's.
+        return value >= 0x8000;
     }
 
     private static bool TryReadClassTable(
@@ -682,11 +683,11 @@ internal static class StructuredMsFormsParser
         if (MsFormsBinary.HasBit(propMask, 12)) dataCursor += 2; // ValueType
         if (MsFormsBinary.HasBit(propMask, 13))
         {
-            dataCursor = AlignAbsolute(dataCursor, 4);
+            dataCursor = AlignOffset(dataCursor, start, 4);
             dataCursor += 4; // DispidRowset
         }
         if (MsFormsBinary.HasBit(propMask, 14)) dataCursor += 2; // SetRowset
-        dataCursor = AlignAbsolute(dataCursor, 4);
+        dataCursor = AlignOffset(dataCursor, start, 4);
 
         if (dataCursor > end)
         {
@@ -727,12 +728,6 @@ internal static class StructuredMsFormsParser
             defaultProg);
         cursor = end;
         return true;
-    }
-
-    private static int AlignAbsolute(int cursor, int alignment)
-    {
-        var remainder = cursor % alignment;
-        return remainder == 0 ? cursor : cursor + alignment - remainder;
     }
 
     private static string ReadGuidString(byte[] data, int offset) => new Guid(data.AsSpan(offset, 16)).ToString("B").ToUpperInvariant();

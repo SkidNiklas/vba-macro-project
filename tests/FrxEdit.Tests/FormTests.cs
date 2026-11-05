@@ -126,8 +126,12 @@ public class FormTests
 
             AddIfOutsideTolerance(differences, control.Name, "left", control.Left, other.LeftPt);
             AddIfOutsideTolerance(differences, control.Name, "top", control.Top, other.TopPt);
-            AddIfOutsideTolerance(differences, control.Name, "width", control.Width, other.WidthPt);
-            AddIfOutsideTolerance(differences, control.Name, "height", control.Height, other.HeightPt);
+            // An ActiveX control keeps its size in its own data, which frxedit does not interpret.
+            if (other.Type != "ActiveX")
+            {
+                AddIfOutsideTolerance(differences, control.Name, "width", control.Width, other.WidthPt);
+                AddIfOutsideTolerance(differences, control.Name, "height", control.Height, other.HeightPt);
+            }
         }
 
         return differences;
