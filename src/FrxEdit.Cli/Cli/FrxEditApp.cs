@@ -212,7 +212,9 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
                 WriteJson(reportOut, comparison);
             }
 
-            var failedChanges = BuildVerification.FindFailedChanges(patch, comparison.Differences);
+            var failedChanges = BuildVerification.FindFailedChanges(patch, comparison.Differences)
+                .Concat(BuildVerification.FindLostSiteFlags(patch, rebuiltLayout.Controls))
+                .ToList();
             if (failedChanges.Count > 0)
             {
                 throw new CliException(

@@ -84,6 +84,90 @@ public class VerificationTests
         Assert.DoesNotContain("Unknown or unsupported property", result.Error);
     }
 
+    [Theory]
+    [InlineData("visible", false)]
+    [InlineData("tabStop", false)]
+    [InlineData("default", true)]
+    [InlineData("cancel", true)]
+    [InlineData("VISIBLE", false)]
+    public void Build_stops_when_a_flag_is_lost(string flag, bool value)
+    {
+        // CommandButton1 in the sample has no BitFlags field, so there is nowhere to write the flag.
+        using var workspace = new Workspace();
+        var output = workspace.PathOf("out/sample.frm");
+        var patch = workspace.WritePatch("patch.json", $$"""{ "properties": { "CommandButton1": { "{{flag}}": {{value.ToString().ToLowerInvariant()}} } } }""");
+
+        var result = workspace.Run("build", SampleForm(), patch, "--out", output, "--mode", "tolerant");
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains($"CommandButton1.{flag}", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("visible", true)]
+    [InlineData("tabStop", true)]
+    [InlineData("default", false)]
+    [InlineData("cancel", false)]
+    public void Build_accepts_a_flag_that_already_has_the_requested_value(string flag, bool value)
+    {
+        using var workspace = new Workspace();
+        var patch = workspace.WritePatch("patch.json", $$"""{ "properties": { "CommandButton1": { "{{flag}}": {{value.ToString().ToLowerInvariant()}} } } }""");
+
+        var result = workspace.Run("build", SampleForm(), patch, "--out", workspace.PathOf("out/sample.frm"), "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+    }
+
+    [Theory]
+    [InlineData("Frame1", "visible", false)]
+    [InlineData("Frame1", "tabStop", false)]
+    [InlineData("Frame1", "default", true)]
+    [InlineData("Frame1", "cancel", true)]
+    [InlineData("Label1", "tabStop", true)]
+    public void Build_writes_a_flag_when_the_control_has_the_field(string control, string flag, bool value)
+    {
+        using var workspace = new Workspace();
+        var output = workspace.PathOf("out/sample.frm");
+        var patch = workspace.WritePatch("patch.json", $$"""{ "properties": { "{{control}}": { "{{flag}}": {{value.ToString().ToLowerInvariant()}} } } }""");
+
+        var result = workspace.Run("build", SampleForm(), patch, "--out", output, "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        var properties = workspace.ReadControls(output).Single(candidate => candidate.Name == control).Properties!;
+        Assert.Equal(value, properties[flag].GetBoolean());
+    }
+
+    [Fact]
+    public void Build_checks_the_flag_of_a_renamed_control()
+    {
+        using var workspace = new Workspace();
+        var patch = workspace.WritePatch("patch.json", """
+            { "renames": { "CommandButton1": "CmdNew" }, "properties": { "CommandButton1": { "cancel": true } } }
+            """);
+
+        var result = workspace.Run("build", SampleForm(), patch, "--out", workspace.PathOf("out/sample.frm"), "--mode", "tolerant");
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("CmdNew.cancel", result.Error);
+    }
+
+    [Fact]
+    public void Added_button_keeps_its_flags()
+    {
+        using var workspace = new Workspace();
+        var output = workspace.PathOf("out/sample.frm");
+        var patch = workspace.WritePatch("patch.json", """
+            { "properties": { "CmdNew": { "$action": "add", "type": "CommandButton", "caption": "Ny", "leftPt": 5, "topPt": 5, "widthPt": 60, "heightPt": 20, "cancel": true } } }
+            """);
+
+        var result = workspace.Run("build", SampleForm(), patch, "--out", output, "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        var properties = workspace.ReadControls(output).Single(control => control.Name == "CmdNew").Properties!;
+        Assert.True(properties["cancel"].GetBoolean());
+    }
+
     [Fact]
     public void Failed_build_keeps_existing_output_and_leaves_no_staging_folder()
     {

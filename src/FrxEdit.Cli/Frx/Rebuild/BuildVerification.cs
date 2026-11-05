@@ -6,6 +6,14 @@ internal static partial class BuildVerification
 {
     private static readonly string[] LayoutProperties = ["left", "top", "width", "height"];
 
+    private static readonly Dictionary<string, bool> SiteFlagDefaults = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["tabStop"] = true,
+        ["visible"] = true,
+        ["default"] = false,
+        ["cancel"] = false,
+    };
+
     public static void ThrowIfControlsDiffer(
         IEnumerable<string> sourceNames,
         PatchDocument? patch,
@@ -67,6 +75,47 @@ internal static partial class BuildVerification
         }
 
         return failed;
+    }
+
+    /// <summary>
+    /// Flags in a patch that the rebuilt form doesn't have. A site without a BitFlags field has the default flags,
+    /// and the rewriter can only write to a field that exists, so a change to such a site would otherwise be lost.
+    /// </summary>
+    public static IReadOnlyList<string> FindLostSiteFlags(PatchDocument? patch, IEnumerable<ControlInfo> rebuilt)
+    {
+        var lost = new List<string>();
+        if (patch?.Properties is null)
+        {
+            return lost;
+        }
+
+        var controls = rebuilt.ToLookup(control => control.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, properties) in patch.Properties)
+        {
+            var finalName = patch.Renames is not null && patch.Renames.TryGetValue(name, out var newName) ? newName : name;
+            var control = controls[finalName].FirstOrDefault();
+            if (control is null)
+            {
+                continue;
+            }
+
+            foreach (var (property, value) in properties)
+            {
+                if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                    !SiteFlagDefaults.TryGetValue(property, out var defaultValue))
+                {
+                    continue;
+                }
+
+                var actual = control.Properties?.TryGetValue(property, out var read) is true && read is bool flag ? flag : defaultValue;
+                if (actual != value.GetBoolean())
+                {
+                    lost.Add($"{finalName}.{property}: asked for {value.GetBoolean()}, read back {actual}. This control has no BitFlags field to write to.");
+                }
+            }
+        }
+
+        return lost;
     }
 
     private static List<string> ExpectedControlNames(IEnumerable<string> sourceNames, PatchDocument? patch)

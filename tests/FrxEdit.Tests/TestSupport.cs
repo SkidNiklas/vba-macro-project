@@ -27,7 +27,8 @@ internal sealed record ControlRecord(
     double? LeftPt,
     double? TopPt,
     double? WidthPt,
-    double? HeightPt);
+    double? HeightPt,
+    Dictionary<string, JsonElement>? Properties = null);
 
 internal sealed record LayoutFile(List<ControlRecord> Controls);
 
