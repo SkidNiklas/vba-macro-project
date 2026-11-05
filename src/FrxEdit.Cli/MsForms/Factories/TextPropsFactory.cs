@@ -4,6 +4,9 @@ internal static class TextPropsFactory
     public const uint CommandButtonMask = 0x0000_0075; // Standard + ParagraphAlign.
     public const uint ParagraphAlignMask = 0x0000_0040;
 
+    /// <summary>Excel sets the bold bit on weights 600 and 700 in the forms tested, and not without a weight.</summary>
+    private const int MinimumBoldWeight = 600;
+
     public static byte[] Build(Dictionary<string, object?> properties, uint propMask)
     {
         var fontName = MsFormsFactoryBinary.GetString(properties, "fontName") ?? "Tahoma";
@@ -20,7 +23,8 @@ internal static class TextPropsFactory
         var fontCharSet = MsFormsFactoryBinary.GetInt32(properties, "fontCharSet") ?? 0;
         var fontPitchAndFamily = MsFormsFactoryBinary.GetInt32(properties, "fontPitchAndFamily") ?? 2;
 
-        if (fontItalic || fontUnderline || fontStrikethrough)
+        var sourceEffects = GetSourceFontEffects(properties);
+        if (sourceEffects is not null || fontItalic || fontUnderline || fontStrikethrough)
         {
             propMask |= 1u << 1;
         }
@@ -29,10 +33,15 @@ internal static class TextPropsFactory
             propMask |= 1u << 7;
         }
 
-        uint fontEffects = 0;
-        if (fontItalic) fontEffects |= 1u << 1;
-        if (fontUnderline) fontEffects |= 1u << 2;
-        if (fontStrikethrough) fontEffects |= 1u << 3;
+        // Keep the bits frxedit doesn't interpret, and change only the ones a property controls.
+        var fontEffects = sourceEffects ?? 0;
+        fontEffects = WithBit(fontEffects, 1, fontItalic);
+        fontEffects = WithBit(fontEffects, 2, fontUnderline);
+        fontEffects = WithBit(fontEffects, 3, fontStrikethrough);
+        if (sourceEffects is not null && MsFormsFactoryBinary.GetInt32(properties, "fontWeight") is int explicitWeight)
+        {
+            fontEffects = WithBit(fontEffects, 0, explicitWeight >= MinimumBoldWeight);
+        }
 
         using var dataBlock = new MemoryStream();
         if (HasBit(propMask, 0))
@@ -143,6 +152,26 @@ internal static class TextPropsFactory
     }
 
     private static bool HasBit(uint value, int bit) => (value & (1u << bit)) != 0;
+
+    private static uint WithBit(uint value, int bit, bool on) => on ? value | (1u << bit) : value & ~(1u << bit);
+
+    /// <summary>The FontEffects value read from the source form. A value above int.MaxValue is valid, so GetInt32 won't do.</summary>
+    private static uint? GetSourceFontEffects(Dictionary<string, object?> properties)
+    {
+        if (!properties.TryGetValue("fontEffects", out var value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            uint unsigned => unsigned,
+            int signed => unchecked((uint)signed),
+            long wide when wide is >= 0 and <= uint.MaxValue => (uint)wide,
+            JsonElement element when element.ValueKind == JsonValueKind.Number && element.TryGetUInt32(out var parsed) => parsed,
+            _ => null
+        };
+    }
 
     public static uint WithParagraphAlignIfNeeded(uint propMask, Dictionary<string, object?> properties)
     {

@@ -83,6 +83,30 @@ public class FormTests
 
     [Theory]
     [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
+    public void RoundTrip_without_changes_keeps_font_effects(string form)
+    {
+        using var workspace = new Workspace();
+        var source = workspace.CopyForm(TestForms.PathOf(form));
+        var output = workspace.PathOf($"out/{form}.frm");
+
+        var result = workspace.Run("build", source, "--out", output, "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        var rebuilt = workspace.ReadControls(output).ToDictionary(control => control.Name);
+        var differences = new List<string>();
+        foreach (var control in workspace.ReadControls(source))
+        {
+            AddIfDifferent(differences, control.Name, "fontEffects", FontEffects(control), FontEffects(rebuilt[control.Name]));
+        }
+
+        AssertNoDifferences(differences);
+    }
+
+    private static uint? FontEffects(ControlRecord control) =>
+        control.Properties?.TryGetValue("fontEffects", out var value) is true ? value.GetUInt32() : null;
+
+    [Theory]
+    [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
     public void Build_stops_when_the_size_of_an_ActiveX_control_is_changed(string form)
     {
         using var workspace = new Workspace();

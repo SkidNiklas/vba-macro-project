@@ -238,7 +238,7 @@ public class VerificationTests
         return form;
     }
 
-    private static string SampleForm()
+    internal static string SampleForm()
     {
         var folder = new DirectoryInfo(AppContext.BaseDirectory);
         while (folder is not null && !File.Exists(Path.Combine(folder.FullName, "FrxEdit.sln")))

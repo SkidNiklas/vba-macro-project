@@ -239,6 +239,7 @@ internal static class ObjectPayloadSerializer
         if (props.TryGetValue("fontCharSet", out var fontCharSet) && fontCharSet is not null) textPropValues["fontCharSet"] = fontCharSet;
         if (props.TryGetValue("fontPitchAndFamily", out var fontPitchAndFamily) && fontPitchAndFamily is not null) textPropValues["fontPitchAndFamily"] = fontPitchAndFamily;
         if (props.TryGetValue("fontWeight", out var fontWeight) && fontWeight is not null) textPropValues["fontWeight"] = fontWeight;
+        if (props.TryGetValue("fontEffects", out var fontEffects) && fontEffects is not null) textPropValues["fontEffects"] = fontEffects;
         var textProps = TextPropsFactory.Build(textPropValues, TextPropsFactory.CommandButtonMask);
 
         const uint defaultForeColor = 0x8000_0012;
@@ -365,6 +366,7 @@ internal static class ObjectPayloadSerializer
         if (props.TryGetValue("fontCharSet", out var fontCharSet) && fontCharSet is not null) textPropValues["fontCharSet"] = fontCharSet;
         if (props.TryGetValue("fontPitchAndFamily", out var fontPitchAndFamily) && fontPitchAndFamily is not null) textPropValues["fontPitchAndFamily"] = fontPitchAndFamily;
         if (props.TryGetValue("fontWeight", out var fontWeight) && fontWeight is not null) textPropValues["fontWeight"] = fontWeight;
+        if (props.TryGetValue("fontEffects", out var fontEffects) && fontEffects is not null) textPropValues["fontEffects"] = fontEffects;
         var textPropsMask = TextPropsFactory.WithParagraphAlignIfNeeded(TextPropsFactory.StandardMask, textPropValues);
         var textProps = TextPropsFactory.Build(textPropValues, textPropsMask);
 
@@ -565,6 +567,7 @@ internal static class ObjectPayloadSerializer
         if (props.TryGetValue("fontCharSet", out var fontCharSet) && fontCharSet is not null) textPropValues["fontCharSet"] = fontCharSet;
         if (props.TryGetValue("fontPitchAndFamily", out var fontPitchAndFamily) && fontPitchAndFamily is not null) textPropValues["fontPitchAndFamily"] = fontPitchAndFamily;
         if (props.TryGetValue("fontWeight", out var fontWeight) && fontWeight is not null) textPropValues["fontWeight"] = fontWeight;
+        if (props.TryGetValue("fontEffects", out var fontEffects) && fontEffects is not null) textPropValues["fontEffects"] = fontEffects;
         var textPropsMask = TextPropsFactory.WithParagraphAlignIfNeeded(TextPropsFactory.StandardMask, textPropValues);
         var textProps = TextPropsFactory.Build(textPropValues, textPropsMask);
 

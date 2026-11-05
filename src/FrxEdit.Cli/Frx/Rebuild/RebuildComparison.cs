@@ -52,7 +52,7 @@ internal sealed record RebuildComparison(
         foreach (var propertyName in new[]
                  {
                      "caption", "value", "tag", "controlTipText", "controlSource", "backColor", "foreColor", "borderColor",
-                     "fontName", "fontSize", "tabIndex", "parser", "sizeSource"
+                     "fontName", "fontSize", "fontEffects", "tabIndex", "parser", "sizeSource"
                  })
         {
             object? sourceValue = null;
