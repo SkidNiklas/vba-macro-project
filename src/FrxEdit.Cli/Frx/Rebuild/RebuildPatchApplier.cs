@@ -1203,6 +1203,7 @@ internal static class RebuildPatchApplier
                 props["fontWeight"] = RequireUInt16(controlName, propertyName, value);
                 break;
             default:
+                RejectUnappliedProperty(controlName, props, propertyName, value, propertyName);
                 break;
         }
     }
@@ -1871,8 +1872,32 @@ internal static class RebuildPatchApplier
                 props[CanonicalPropertyName(normalizedPropertyName)] = RequireInt32(formKey, normalizedPropertyName, value);
                 break;
             default:
+                RejectUnappliedProperty(formKey, props, propertyName, value, propertyName, normalizedPropertyName, "form" + propertyName);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Stops a patch that sets a property the rebuild would drop. Values equal to the current one are
+    /// allowed, because inspect also lists properties that can be read but not written.
+    /// </summary>
+    private static void RejectUnappliedProperty(string owner, Dictionary<string, object?> props, string propertyName, JsonElement value, params string[] currentNames)
+    {
+        if (value.ValueKind == JsonValueKind.Null ||
+            currentNames.Any(name => props.TryGetValue(name, out var current) && JsonValueEquals(current, value)))
+        {
+            return;
+        }
+
+        throw new CliException($"Unknown or unsupported property '{propertyName}' for '{owner}': it cannot be written, so the build was stopped.");
+    }
+
+    private static bool JsonValueEquals(object? current, JsonElement value)
+    {
+        var currentElement = JsonSerializer.SerializeToElement(current, FrxEditApp.JsonOptions);
+        return currentElement.ValueKind == JsonValueKind.Number && value.ValueKind == JsonValueKind.Number
+            ? currentElement.GetDouble().Equals(value.GetDouble())
+            : currentElement.GetRawText().Equals(value.GetRawText(), StringComparison.Ordinal);
     }
 
     private static uint RequireUInt32(string controlName, string propertyName, JsonElement value)

@@ -99,7 +99,7 @@ internal static partial class BuildVerification
         var excess = new List<string>();
         foreach (var (name, count) in counts)
         {
-            excess.AddRange(Enumerable.Repeat(name, count - other.GetValueOrDefault(name)));
+            excess.AddRange(Enumerable.Repeat(name, Math.Max(0, count - other.GetValueOrDefault(name))));
         }
 
         excess.Sort(StringComparer.OrdinalIgnoreCase);

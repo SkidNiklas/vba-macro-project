@@ -1,3 +1,4 @@
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class PatchDocument
 {
     public Dictionary<string, string>? Renames { get; set; }
@@ -103,11 +104,13 @@ internal sealed class PatchDocument
     }
 }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class CodePatch
 {
     public Dictionary<string, List<string>>? TabStripPanels { get; set; }
 }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class LayoutPatch
 {
     // Low-level FRX units. Kept for backwards compatibility and diagnostics.
@@ -127,6 +130,7 @@ internal sealed class LayoutPatch
     public int? Height { get; set; }
 }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class AddControlPatch
 {
     public string? Type { get; set; }
