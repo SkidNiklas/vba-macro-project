@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="FrxEdit.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="..\..\ai-plugin\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>ai-plugin\%(RecursiveDir)%(Filename)%(Extension)</Link>

@@ -37,3 +37,5 @@ scratch/
 test_env/
 # Local Test Environments
 test_env/
+
+TestResults/

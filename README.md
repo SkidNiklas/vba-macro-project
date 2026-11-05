@@ -83,6 +83,24 @@ For deep-dives into how the reverse-engineering of the `[MS-OFORMS]` specificati
 
 ---
 
+## 🧪 Tests
+
+```bash
+dotnet build tests/FrxEdit.Tests/FrxEdit.Tests.csproj
+dotnet tests/FrxEdit.Tests/bin/Debug/net8.0/FrxEdit.Tests.dll
+```
+
+Without any setup, this runs the tests that use generated forms and the sample in `test_data`. Two environment variables add tests against your own forms. Keep both locations outside the repository:
+
+| Variable | Value | Adds |
+| :--- | :--- | :--- |
+| `FRXEDIT_TESTFORMS` | Folder with `.frm` and `.frx` files, which are only read | Per form: round-trip without changes, adding a CommandButton, and accepting `inspect` output as a patch |
+| `FRXEDIT_FACIT` | JSON file written by `scripts/Export-DesignerControls.ps1` | Per form: comparing `inspect` with what Excel reports (needs `FRXEDIT_TESTFORMS` too) |
+
+`Export-DesignerControls.ps1` starts Excel and needs "Trust access to the VBA project object model". It only opens a read-only temporary copy of the add-in, with macros disabled.
+
+---
+
 ## 📄 License
 
 This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
