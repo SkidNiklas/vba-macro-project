@@ -167,39 +167,84 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
         var rebuiltBytes = FrxRebuilder.RebuildContainer(source, targetLayout, streamMode);
 
         var outFrxPath = Path.ChangeExtension(outFrmPath, ".frx");
-        Directory.CreateDirectory(Path.GetDirectoryName(outFrmPath)!);
-        File.WriteAllBytes(outFrxPath, rebuiltBytes);
-
-        var updatedFrm = VbaRenamer.Apply(project.FrmText, patch?.Renames);
-        updatedFrm = UserFormProject.ReplaceOleObjectBlob(updatedFrm, Path.GetFileName(outFrxPath));
-        updatedFrm = ApplyVbaFile(updatedFrm, patchPath, frmPath, project.Encoding);
-        updatedFrm = VbaCodeGenerator.Apply(updatedFrm, patch?.Code);
-        updatedFrm = UserFormProject.SynchronizeFormProperties(updatedFrm, targetLayout.FrxFormControl);
-        File.WriteAllText(outFrmPath, updatedFrm, project.Encoding);
-        var removedScopeNames = targetLayout.RemovedControls?.Select(control => control.Name).ToList() ?? patch?.Remove;
-        UserFormProject.WriteScopesCopy(outFrmPath, project.ControlScopes, patch?.Renames, removedScopeNames);
-
-        var rebuiltProject = UserFormProject.Load(outFrmPath);
-        var rebuilt = FrxBinary.Read(rebuiltProject.FrxPath);
-        var rebuiltLayout = rebuilt.Inspect(rebuiltProject.KnownControlNames, rebuiltProject.ControlScopes, parserMode, rebuiltProject.FormProperties);
-        var comparison = RebuildComparison.From(targetLayout, rebuiltLayout) with
+        var outDir = Path.GetDirectoryName(outFrmPath)!;
+        Directory.CreateDirectory(outDir);
+        var stagingDir = CreateStagingDirectory(outDir);
+        try
         {
-            InputControlCount = sourceLayout.Controls.Count,
-            ExpectedControlCount = targetLayout.Controls.Count
-        };
+            var stagedFrmPath = Path.Combine(stagingDir, Path.GetFileName(outFrmPath));
+            File.WriteAllBytes(Path.ChangeExtension(stagedFrmPath, ".frx"), rebuiltBytes);
 
-        stdout.WriteLine($"Wrote {outFrmPath}");
-        stdout.WriteLine($"Wrote {outFrxPath}");
-        stdout.WriteLine($"OK: rebuilt CFB container and validated with parser mode {parserMode.ToString().ToLowerInvariant()}");
-        stdout.WriteLine($"OK: rebuild stream mode {FormatRebuildStreamMode(streamMode)}");
-        stdout.WriteLine($"OK: controls {comparison.InputControlCount} -> {comparison.ExpectedControlCount} -> {comparison.RebuiltControlCount}, semantic match: {comparison.SemanticMatch}");
+            var updatedFrm = VbaRenamer.Apply(project.FrmText, patch?.Renames);
+            updatedFrm = UserFormProject.ReplaceOleObjectBlob(updatedFrm, Path.GetFileName(outFrxPath));
+            updatedFrm = ApplyVbaFile(updatedFrm, patchPath, frmPath, project.Encoding);
+            updatedFrm = VbaCodeGenerator.Apply(updatedFrm, patch?.Code);
+            updatedFrm = UserFormProject.SynchronizeFormProperties(updatedFrm, targetLayout.FrxFormControl);
+            File.WriteAllText(stagedFrmPath, updatedFrm, project.Encoding);
+            var removedScopeNames = targetLayout.RemovedControls?.Select(control => control.Name).ToList() ?? patch?.Remove;
+            UserFormProject.WriteScopesCopy(stagedFrmPath, project.ControlScopes, patch?.Renames, removedScopeNames);
 
-        if (parsed.GetOption("report-out") is { } reportOut)
-        {
-            WriteJson(reportOut, comparison);
+            var rebuiltProject = UserFormProject.Load(stagedFrmPath);
+            var rebuilt = FrxBinary.Read(rebuiltProject.FrxPath);
+            var rebuiltLayout = rebuilt.Inspect(rebuiltProject.KnownControlNames, rebuiltProject.ControlScopes, parserMode, rebuiltProject.FormProperties);
+
+            BuildVerification.ThrowIfControlsDiffer(
+                sourceLayout.Controls.Select(control => control.Name),
+                patch,
+                rebuiltLayout.Controls.Select(control => control.Name));
+
+            var comparison = RebuildComparison.From(targetLayout, rebuiltLayout) with
+            {
+                InputControlCount = sourceLayout.Controls.Count,
+                ExpectedControlCount = targetLayout.Controls.Count
+            };
+
+            if (parsed.GetOption("report-out") is { } reportOut)
+            {
+                WriteJson(reportOut, comparison);
+            }
+
+            var failedChanges = BuildVerification.FindFailedChanges(patch, comparison.Differences);
+            if (failedChanges.Count > 0)
+            {
+                throw new CliException(
+                    $"Verification failed: the rebuilt form does not match the requested changes. No output was written.{Environment.NewLine}  " +
+                    string.Join($"{Environment.NewLine}  ", failedChanges));
+            }
+
+            PublishStagedFiles(stagedFrmPath, outFrmPath);
+
+            stdout.WriteLine($"Wrote {outFrmPath}");
+            stdout.WriteLine($"Wrote {outFrxPath}");
+            stdout.WriteLine($"OK: rebuilt CFB container and validated with parser mode {parserMode.ToString().ToLowerInvariant()}");
+            stdout.WriteLine($"OK: rebuild stream mode {FormatRebuildStreamMode(streamMode)}");
+            stdout.WriteLine($"OK: controls {comparison.InputControlCount} -> {comparison.ExpectedControlCount} -> {comparison.RebuiltControlCount}, semantic match: {comparison.SemanticMatch}");
+            foreach (var difference in comparison.Differences)
+            {
+                stderr.WriteLine($"warning: {difference}");
+            }
+
+            return 0;
         }
+        finally
+        {
+            Directory.Delete(stagingDir, recursive: true);
+        }
+    }
 
-        return 0;
+    private static string CreateStagingDirectory(string outDir) =>
+        Directory.CreateDirectory(Path.Combine(outDir, $".frxedit-staging-{Guid.NewGuid():N}")).FullName;
+
+    private static void PublishStagedFiles(string stagedFrmPath, string outFrmPath)
+    {
+        File.Move(Path.ChangeExtension(stagedFrmPath, ".frx"), Path.ChangeExtension(outFrmPath, ".frx"), overwrite: true);
+        File.Move(stagedFrmPath, outFrmPath, overwrite: true);
+
+        var stagedScopesPath = Path.ChangeExtension(stagedFrmPath, ".scopes.json");
+        if (File.Exists(stagedScopesPath))
+        {
+            File.Move(stagedScopesPath, Path.ChangeExtension(outFrmPath, ".scopes.json"), overwrite: true);
+        }
     }
 
     private int Create(string[] args)
@@ -217,40 +262,58 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
         }
 
         var outFrxPath = Path.ChangeExtension(outFrmPath, ".frx");
-        Directory.CreateDirectory(Path.GetDirectoryName(outFrmPath)!);
-        var generated = GeneratedUserFormFactory.Create(formName, caption, widthPt, heightPt, Path.GetFileName(outFrxPath));
-        File.WriteAllBytes(outFrxPath, generated.FrxBytes);
-        File.WriteAllText(outFrmPath, generated.FrmText, Encoding.GetEncoding(1252));
-
-        if (parsed.GetOption("patch") is { } patchPath)
+        var outDir = Path.GetDirectoryName(outFrmPath)!;
+        Directory.CreateDirectory(outDir);
+        var stagingDir = CreateStagingDirectory(outDir);
+        try
         {
-            var patch = JsonSerializer.Deserialize<PatchDocument>(File.ReadAllText(Path.GetFullPath(patchPath)), JsonOptions)
-                ?? throw new CliException("Patch file is empty.");
-            var project = UserFormProject.Load(outFrmPath);
-            var source = FrxBinary.Read(project.FrxPath);
-            var sourceLayout = source.Inspect(project.KnownControlNames, project.ControlScopes, ParserMode.Strict, project.FormProperties);
-            PatchValidator.Validate(patch, sourceLayout.Controls, formName: project.FormName);
-            RebuildPatchApplier.ValidateObjectPatch(patch, allowFormSitePatch: true, formName: project.FormName);
-            var targetLayout = RebuildPatchApplier.ApplyObjectPropertyPatch(sourceLayout, patch, allowFormSitePatch: true, formName: project.FormName, patchDir: Path.GetDirectoryName(Path.GetFullPath(patchPath)));
-            VbaCodeGenerator.Validate(patch.Code, targetLayout.Controls);
-            var rebuiltBytes = FrxRebuilder.RebuildContainer(source, targetLayout, RebuildStreamMode.FormAndObjectPatch);
-            File.WriteAllBytes(outFrxPath, rebuiltBytes);
+            var stagedFrmPath = Path.Combine(stagingDir, Path.GetFileName(outFrmPath));
+            var stagedFrxPath = Path.ChangeExtension(stagedFrmPath, ".frx");
+            var generated = GeneratedUserFormFactory.Create(formName, caption, widthPt, heightPt, Path.GetFileName(outFrxPath));
+            File.WriteAllBytes(stagedFrxPath, generated.FrxBytes);
+            File.WriteAllText(stagedFrmPath, generated.FrmText, Encoding.GetEncoding(1252));
 
-            var updatedFrm = VbaRenamer.Apply(project.FrmText, patch.Renames);
-            updatedFrm = UserFormProject.ReplaceOleObjectBlob(updatedFrm, Path.GetFileName(outFrxPath));
-            updatedFrm = ApplyVbaFile(updatedFrm, patchPath, outFrmPath, project.Encoding);
-            updatedFrm = VbaCodeGenerator.Apply(updatedFrm, patch.Code);
-            updatedFrm = UserFormProject.SynchronizeFormProperties(updatedFrm, targetLayout.FrxFormControl);
-            File.WriteAllText(outFrmPath, updatedFrm, project.Encoding);
+            IEnumerable<string> sourceNames = [];
+            PatchDocument? patch = null;
+            if (parsed.GetOption("patch") is { } patchPath)
+            {
+                patch = JsonSerializer.Deserialize<PatchDocument>(File.ReadAllText(Path.GetFullPath(patchPath)), JsonOptions)
+                    ?? throw new CliException("Patch file is empty.");
+                var project = UserFormProject.Load(stagedFrmPath);
+                patch.Normalize(project.FormName);
+                var source = FrxBinary.Read(project.FrxPath);
+                var sourceLayout = source.Inspect(project.KnownControlNames, project.ControlScopes, ParserMode.Strict, project.FormProperties);
+                sourceNames = sourceLayout.Controls.Select(control => control.Name).ToList();
+                PatchValidator.Validate(patch, sourceLayout.Controls, formName: project.FormName);
+                RebuildPatchApplier.ValidateObjectPatch(patch, allowFormSitePatch: true, formName: project.FormName);
+                var targetLayout = RebuildPatchApplier.ApplyObjectPropertyPatch(sourceLayout, patch, allowFormSitePatch: true, formName: project.FormName, patchDir: Path.GetDirectoryName(Path.GetFullPath(patchPath)));
+                VbaCodeGenerator.Validate(patch.Code, targetLayout.Controls);
+                var rebuiltBytes = FrxRebuilder.RebuildContainer(source, targetLayout, RebuildStreamMode.FormAndObjectPatch);
+                File.WriteAllBytes(stagedFrxPath, rebuiltBytes);
+
+                var updatedFrm = VbaRenamer.Apply(project.FrmText, patch.Renames);
+                updatedFrm = UserFormProject.ReplaceOleObjectBlob(updatedFrm, Path.GetFileName(outFrxPath));
+                updatedFrm = ApplyVbaFile(updatedFrm, patchPath, outFrmPath, project.Encoding);
+                updatedFrm = VbaCodeGenerator.Apply(updatedFrm, patch.Code);
+                updatedFrm = UserFormProject.SynchronizeFormProperties(updatedFrm, targetLayout.FrxFormControl);
+                File.WriteAllText(stagedFrmPath, updatedFrm, project.Encoding);
+            }
+
+            var validationProject = UserFormProject.Load(stagedFrmPath);
+            var validationFrx = FrxBinary.Read(validationProject.FrxPath);
+            var validationLayout = validationFrx.Inspect(validationProject.KnownControlNames, validationProject.ControlScopes, ParserMode.Strict, validationProject.FormProperties);
+            BuildVerification.ThrowIfControlsDiffer(sourceNames, patch, validationLayout.Controls.Select(control => control.Name));
+
+            PublishStagedFiles(stagedFrmPath, outFrmPath);
+
+            stdout.WriteLine($"Wrote {outFrmPath}");
+            stdout.WriteLine($"Wrote {outFrxPath}");
+            return 0;
         }
-
-        var validationProject = UserFormProject.Load(outFrmPath);
-        var validationFrx = FrxBinary.Read(validationProject.FrxPath);
-        validationFrx.Inspect(validationProject.KnownControlNames, validationProject.ControlScopes, ParserMode.Strict, validationProject.FormProperties);
-
-        stdout.WriteLine($"Wrote {outFrmPath}");
-        stdout.WriteLine($"Wrote {outFrxPath}");
-        return 0;
+        finally
+        {
+            Directory.Delete(stagingDir, recursive: true);
+        }
     }
 
     private int Watch(string[] args)
@@ -670,9 +733,11 @@ internal sealed class FrxEditApp(TextWriter stdout, TextWriter stderr)
         stdout.WriteLine("  Automatically rebuilds the UserForm when the JSON, VBA, or image assets change.\n");
 
         stdout.WriteLine("frxedit build <UserForm.frm> [<patch.json>] --out <UserForm.rebuilt.frm> [--mode strict] [--stream-mode full-patch]");
-        stdout.WriteLine("  Regenerates the OLE/CFB container. Merges patch structural changes, code and properties seamlessly.\n");
+        stdout.WriteLine("  Regenerates the OLE/CFB container. Merges patch structural changes, code and properties seamlessly.");
+        stdout.WriteLine("  Reads the result back and fails, writing nothing, if controls are missing or unexpected, or if a patched value was not kept.\n");
 
-        stdout.WriteLine("frxedit create <UserFormNew.frm> --name UserFormNew [--caption Demo] [--widthPt 340] [--heightPt 240] [--patch form.patch.json]\n");
+        stdout.WriteLine("frxedit create <UserFormNew.frm> --name UserFormNew [--caption Demo] [--widthPt 340] [--heightPt 240] [--patch form.patch.json]");
+        stdout.WriteLine("  Reads the result back and fails, writing nothing, if controls are missing or unexpected.\n");
 
         stdout.WriteLine("--- DIAGNOSTIC & DEBUG COMMANDS ---");
         stdout.WriteLine("frxedit inspect <UserForm.frm> --out layout.json --raw-out layout.raw.json");
