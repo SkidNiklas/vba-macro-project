@@ -49,14 +49,11 @@ internal static class FormControlParser
             if (Has(propMask, 7)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formBorderStyle", result);
             if (Has(propMask, 8)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formMousePointer", result);
             if (Has(propMask, 9)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formScrollBars", result);
-            Align(ref cursor, 4);
             if (Has(propMask, 13)) ReadInt32(data, fileOffsets, ref cursor, blockEnd, "formGroupCount", result);
             if (Has(propMask, 15)) ReadUInt16(data, fileOffsets, ref cursor, blockEnd, "formMouseIconMarker", result);
             if (Has(propMask, 16)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formCycle", result);
             if (Has(propMask, 17)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formSpecialEffect", result);
-            Align(ref cursor, 4);
             if (Has(propMask, 18)) ReadColor(data, fileOffsets, ref cursor, blockEnd, "formBorderColor", result);
-            Align(ref cursor, 4);
             int formCaptionCountLocalOffset = -1;
             if (Has(propMask, 19))
             {
@@ -69,19 +66,13 @@ internal static class FormControlParser
                 result["formCaptionPaddedByteCount"] = MsFormsBinary.Align4(captionCount.Value.Count);
                 result["formCaptionCountLocalOffset"] = formCaptionCountLocalOffset;
             }
-            Align(ref cursor, 2);
             if (Has(propMask, 20)) ReadUInt16(data, fileOffsets, ref cursor, blockEnd, "formFontMarker", result);
-            Align(ref cursor, 2);
             if (Has(propMask, 21)) ReadUInt16(data, fileOffsets, ref cursor, blockEnd, "formPictureMarker", result);
-            Align(ref cursor, 4);
             if (Has(propMask, 22)) ReadUInt32(data, fileOffsets, ref cursor, blockEnd, "formZoom", result);
             if (Has(propMask, 23)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formPictureAlignment", result);
             if (Has(propMask, 25)) ReadByte(data, fileOffsets, ref cursor, blockEnd, "formPictureSizeMode", result);
-            Align(ref cursor, 4);
             if (Has(propMask, 26)) ReadUInt32(data, fileOffsets, ref cursor, blockEnd, "formShapeCookie", result);
-            Align(ref cursor, 4);
             if (Has(propMask, 27)) ReadUInt32(data, fileOffsets, ref cursor, blockEnd, "formDrawBuffer", result);
-            Align(ref cursor, 4);
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentOutOfRangeException)
         {

@@ -1,5 +1,7 @@
 internal static class ObjectStreamParser
 {
+    private const uint ActiveXSignature = 0x1234_4321;
+
     public static ObjectStreamProperties Read(StorageEntryDump stream, string? controlType = null)
     {
         var props = controlType switch
@@ -11,12 +13,43 @@ internal static class ObjectStreamParser
             "SpinButton" => TryReadSpinButton(stream),
             "TabStrip" => TryReadTabStrip(stream),
             "TextBox" or "ComboBox" or "ListBox" or "CheckBox" or "OptionButton" or "ToggleButton" => TryReadMorphData(stream, controlType),
+            "ActiveX" => TryReadActiveXExtent(stream),
             _ => null
         };
 
         if (props != null) return props;
 
         return ReadHeuristic(stream);
+    }
+
+    /// <summary>
+    /// The object data of an ActiveX control starts with a signature, the size of the extent (8), then its width
+    /// and height in HIMETRIC. [MS-OFORMS] leaves this data to the control, so the layout comes from comparing
+    /// the ListView, TreeView and ProgressBar controls of real forms with the sizes Excel reports.
+    /// </summary>
+    private static ObjectStreamProperties? TryReadActiveXExtent(StorageEntryDump stream)
+    {
+        var data = stream.Data;
+        if (data.Length < 16 ||
+            BinaryPrimitives.ReadUInt32LittleEndian(data) != ActiveXSignature ||
+            BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4)) != 8)
+        {
+            return null;
+        }
+
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["objectStreamSize"] = stream.Size,
+            ["parser"] = "activeXExtent",
+            ["sizeSource"] = "activeXExtent",
+        };
+
+        return new ObjectStreamProperties(
+            properties,
+            BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(8)),
+            BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(12)),
+            stream.FileOffsets[8],
+            stream.FileOffsets[12]);
     }
 
     private static ObjectStreamProperties ReadHeuristic(StorageEntryDump stream)

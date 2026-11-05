@@ -81,6 +81,27 @@ public class FormTests
         AssertNoDifferences(CompareWithFacit(expected, actual));
     }
 
+    [Theory]
+    [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
+    public void Build_stops_when_the_size_of_an_ActiveX_control_is_changed(string form)
+    {
+        using var workspace = new Workspace();
+        var source = workspace.CopyForm(TestForms.PathOf(form));
+        var activeX = workspace.ReadControls(source).FirstOrDefault(control => control.Type == "ActiveX");
+        if (activeX is null)
+        {
+            Assert.Skip("This form has no ActiveX control.");
+        }
+
+        var output = workspace.PathOf($"out/{form}.frm");
+        var patch = workspace.WritePatch("patch.json", $$"""{ "properties": { "{{activeX.Name}}": { "widthPt": 123 } } }""");
+
+        var result = workspace.Run("build", source, patch, "--out", output, "--mode", "tolerant");
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.False(File.Exists(output));
+    }
+
     private static List<string> CompareLayouts(IReadOnlyList<ControlRecord> expected, IReadOnlyList<ControlRecord> actual)
     {
         var differences = NameDifferences(expected.Select(control => control.Name), actual.Select(control => control.Name));
@@ -132,12 +153,8 @@ public class FormTests
 
             AddIfOutsideTolerance(differences, control.Name, "left", control.Left, other.LeftPt);
             AddIfOutsideTolerance(differences, control.Name, "top", control.Top, other.TopPt);
-            // An ActiveX control keeps its size in its own data, which frxedit does not interpret.
-            if (other.Type != "ActiveX")
-            {
-                AddIfOutsideTolerance(differences, control.Name, "width", control.Width, other.WidthPt);
-                AddIfOutsideTolerance(differences, control.Name, "height", control.Height, other.HeightPt);
-            }
+            AddIfOutsideTolerance(differences, control.Name, "width", control.Width, other.WidthPt);
+            AddIfOutsideTolerance(differences, control.Name, "height", control.Height, other.HeightPt);
         }
 
         return differences;
