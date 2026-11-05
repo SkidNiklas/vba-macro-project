@@ -498,11 +498,15 @@ internal abstract class MorphButtonControlSchema : IGeneratedControlSchema
         var accelerator = MsFormsFactoryBinary.GetString(request.Properties, "accelerator");
         var groupName = MsFormsFactoryBinary.GetString(request.Properties, "groupName") ?? string.Empty;
         var groupNameBytes = Encoding.Latin1.GetBytes(groupName);
-        var propMask = MsFormsFactoryBinary.WithVariousBitsField(
-            BuildPropMask(valueBytes.Length, captionBytes.Length, groupNameBytes.Length, backColor, foreColor, variousBits,
-                mousePointer, multiSelect, picturePosition, specialEffect, accelerator),
+        const ulong storedWithDefaults = 1ul << 1 | 1ul << 2 | 1ul << 24 | 1ul << 26; // BackColor, ForeColor, PicturePosition, SpecialEffect.
+        var propMask = MsFormsFactoryBinary.WithStoredFields(
+            MsFormsFactoryBinary.WithVariousBitsField(
+                BuildPropMask(valueBytes.Length, captionBytes.Length, groupNameBytes.Length, backColor, foreColor, variousBits,
+                    mousePointer, multiSelect, picturePosition, specialEffect, accelerator),
+                request.Properties,
+                variousBits),
             request.Properties,
-            variousBits);
+            storedWithDefaults);
 
         using var dataBlock = new MemoryStream();
         WriteDataBlock(dataBlock, propMask, valueBytes, captionBytes, groupNameBytes, backColor, foreColor, variousBits,
@@ -733,6 +737,9 @@ internal abstract class MorphListControlSchema : IGeneratedControlSchema
         {
             propMask |= 1ul << 15;
         }
+
+        const ulong storedWithDefaults = 1ul << 1 | 1ul << 2 | 1ul << 4 | 1ul << 5 | 1ul << 25 | 1ul << 26; // Colors, BorderStyle, ScrollBars, SpecialEffect.
+        propMask = MsFormsFactoryBinary.WithStoredFields(propMask, request.Properties, storedWithDefaults);
 
         using var dataBlock = new MemoryStream();
         WriteDataBlock(dataBlock, propMask, valueBytes, backColor, foreColor, borderColor, variousBits, maxLength, borderStyle, scrollBars,

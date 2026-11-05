@@ -114,6 +114,40 @@ public class FidelityTests
     }
 
     [Fact]
+    public void A_toggle_button_keeps_a_color_it_stored_with_the_default_value()
+    {
+        var properties = ReadMorph(new ToggleButtonControlSchema(), "ToggleButton", new()
+        {
+            ["propMask"] = "0x0000000080000142",
+            ["backColor"] = "&H8000000F&",
+        });
+
+        Assert.Equal("systemButtonFace", properties["backColor"]);
+    }
+
+    [Fact]
+    public void A_new_toggle_button_stores_no_default_color()
+    {
+        var properties = ReadMorph(new ToggleButtonControlSchema(), "ToggleButton", new());
+
+        Assert.False(properties.ContainsKey("backColor"));
+    }
+
+    [Fact]
+    public void The_sample_toggle_button_can_be_written_anew()
+    {
+        using var workspace = new Workspace();
+        var output = workspace.PathOf("out/sample.frm");
+        var patch = workspace.WritePatch("patch.json", """{ "properties": { "ToggleButton1": { "fontItalic": true } } }""");
+
+        var result = workspace.Run("build", VerificationTests.SampleForm(), patch, "--out", output, "--mode", "tolerant");
+
+        Assert.True(result.ExitCode == 0, result.Describe());
+        var properties = workspace.ReadControls(output).Single(control => control.Name == "ToggleButton1").Properties!;
+        Assert.True(properties["fontItalic"].GetBoolean());
+    }
+
+    [Fact]
     public void Column_count_field_is_written_for_a_list_with_column_info()
     {
         var properties = ReadMorph(new ListBoxControlSchema(), "ListBox", new() { ["cColumnInfo"] = 2, ["columnCount"] = 2 });

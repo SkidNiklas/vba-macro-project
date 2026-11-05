@@ -45,6 +45,10 @@ internal static class MsFormsFactoryBinary
         return GetSourcePropMask(properties) is ulong mask && (mask & 1) == 0 ? MorphDataDefaultVariousBits : forNewControl;
     }
 
+    /// <summary>A rebuilt control keeps these fields if its source stored them, even with the default value.</summary>
+    public static ulong WithStoredFields(ulong propMask, Dictionary<string, object?> properties, ulong fields) =>
+        GetSourcePropMask(properties) is ulong source ? propMask | (source & fields) : propMask;
+
     /// <summary>A rebuilt control stores VariousPropertyBits if its source did, or if the value now differs from the default.</summary>
     public static ulong WithVariousBitsField(ulong propMask, Dictionary<string, object?> properties, uint variousBits)
     {
