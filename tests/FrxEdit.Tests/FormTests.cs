@@ -83,6 +83,33 @@ public class FormTests
 
     [Theory]
     [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
+    public void Inspect_matches_the_properties_Excel_reports(string form)
+    {
+        var formPath = TestForms.PathOf(form);
+        var expected = Facit.ControlsOf(form);
+        if (expected is null)
+        {
+            Assert.Skip($"{Facit.FacitVariable} is not set, or has no entry for this form.");
+        }
+
+        using var workspace = new Workspace();
+        var actual = workspace.ReadControls(workspace.CopyForm(formPath));
+        var differences = new List<string>();
+        var compared = 0;
+        foreach (var control in expected)
+        {
+            var other = actual.First(candidate => candidate.Name.Equals(control.Name, StringComparison.OrdinalIgnoreCase));
+            var result = FacitComparison.Compare(control, other.Type, other.Properties);
+            differences.AddRange(result.Differences);
+            compared += result.Compared;
+        }
+
+        AssertNoDifferences(differences);
+        Assert.True(compared > 0, "Nothing was compared.");
+    }
+
+    [Theory]
+    [MemberData(nameof(TestForms.All), MemberType = typeof(TestForms))]
     public void RoundTrip_without_changes_keeps_font_effects(string form)
     {
         using var workspace = new Workspace();

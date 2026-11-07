@@ -3,6 +3,9 @@
     Exports what Excel itself reports for every UserForm control to JSON, as a reference for frxedit tests.
 
 .DESCRIPTION
+    Writes type, parent, position and size, and the properties in DesignerProperties.ps1, which
+    Test-ImportInExcel.ps1 also compares.
+
     Copies the add-in to a temp folder and opens only the copy, read-only and with macros disabled, in a
     new hidden Excel. The original file and the user's add-in settings are not changed. The script stops
     without exporting if anything named like the add-in is already loaded in that Excel, because Excel
@@ -26,6 +29,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'DesignerProperties.ps1')
 Add-Type -AssemblyName Microsoft.VisualBasic
 Add-Type -Namespace FrxEditFacit -Name NativeMethods -MemberDefinition @'
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -36,7 +40,7 @@ $msoAutomationSecurityForceDisable = 3
 $xlDoNotUpdateLinks = 0
 
 function Get-ControlRecord($control, [string] $typeName, [string] $parentName) {
-    [ordered]@{
+    $record = [ordered]@{
         name   = [string] $control.Name
         type   = $typeName
         parent = $parentName
@@ -45,6 +49,9 @@ function Get-ControlRecord($control, [string] $typeName, [string] $parentName) {
         width  = [double] $control.Width
         height = [double] $control.Height
     }
+    $properties = Get-DesignerProperties $control
+    foreach ($property in $properties.Keys) { $record[$property] = $properties[$property] }
+    $record
 }
 
 function Get-ParentName($control, [string] $formName) {
